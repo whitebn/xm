@@ -4,8 +4,8 @@ import {
   LayoutDashboard,
   FolderKanban,
   Calendar,
-  FileText,
   Files,
+  Camera,
   Settings,
   Users,
   BarChart3,
@@ -26,6 +26,7 @@ const Sidebar: React.FC = () => {
     { to: '/templates', icon: Layers, label: 'Templates' },
     { to: '/calendar', icon: Calendar, label: 'Calendar' },
     { to: '/files', icon: Files, label: 'Files' },
+    { to: '/photos', icon: Camera, label: 'Photos' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
   ];
 

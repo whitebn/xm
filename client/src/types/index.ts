@@ -206,6 +206,30 @@ export interface ReportConfig {
   createdAt: string;
 }
 
+// Photo Library Types
+export interface PhotoTag {
+  id: string;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface Photo {
+  id: string;
+  projectId: string | null;
+  name: string;
+  type: 'local' | 'onedrive' | 'onedrive_link';
+  mimeType: string;
+  size: number;
+  path: string;
+  oneDriveUrl?: string;
+  categoryId: string | null;
+  uploadedById: string;
+  uploadedBy?: User;
+  tags: PhotoTag[];
+  createdAt: string;
+}
+
 // API Response Types
 export interface ApiResponse<T> {
   success: boolean;

@@ -4,6 +4,7 @@ export { default as ProjectDetail } from './ProjectDetail';
 export { default as ProjectForm } from './ProjectForm';
 export { default as Templates } from './Templates';
 export { default as Files } from './Files';
+export { default as Photos } from './Photos';
 export { default as Reports } from './Reports';
 export { default as Settings } from './Settings';
 export { default as Login } from './Login';

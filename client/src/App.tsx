@@ -10,6 +10,7 @@ import {
   ProjectForm,
   Templates,
   Files,
+  Photos,
   Reports,
   Settings,
   Login,
@@ -101,6 +102,7 @@ const AppRoutes: React.FC = () => {
         <Route path="/templates" element={<Templates />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/files" element={<Files />} />
+        <Route path="/photos" element={<Photos />} />
         <Route path="/reports" element={<Reports />} />
 
         {/* Manager Routes */}

@@ -10,7 +10,21 @@ const ProjectForm: React.FC = () => {
   const navigate = useNavigate();
   const isEditing = Boolean(id);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    contractNumber: string;
+    status: 'planning' | 'in_progress' | 'completed' | 'on_hold' | 'cancelled';
+    installStartDate: string;
+    installEndDate: string;
+    eventStartDate: string;
+    eventEndDate: string;
+    strikeStartDate: string;
+    strikeEndDate: string;
+    projectManagerId: string;
+    crewLeadId: string;
+    salesRepId: string;
+    isTemplate: boolean;
+  }>({
     name: '',
     contractNumber: '',
     status: 'planning',

@@ -1,4 +1,4 @@
-import { Client } from '@microsoft/microsoft-graph-client';
+import { Client, ResponseType } from '@microsoft/microsoft-graph-client';
 
 interface OneDriveItem {
   id: string;
@@ -15,6 +15,12 @@ interface OneDriveItem {
     path: string;
   };
   lastModifiedDateTime: string;
+  thumbnails?: Array<{
+    id: string;
+    small?: { url: string; width: number; height: number };
+    medium?: { url: string; width: number; height: number };
+    large?: { url: string; width: number; height: number };
+  }>;
 }
 
 interface OneDriveResponse {
@@ -97,7 +103,7 @@ class OneDriveService {
 
     const response = await this.client
       .api(`/me/drive/items/${itemId}/content`)
-      .responseType('blob' as ResponseType)
+      .responseType(ResponseType.BLOB)
       .get();
 
     return response;
