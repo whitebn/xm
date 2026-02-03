@@ -1,15 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FolderKanban } from 'lucide-react';
-import { Button } from '../components/UI';
+import { FolderKanban, LogIn } from 'lucide-react';
+import { Button, Input } from '../components/UI';
 import { useAuth } from '../context/AuthContext';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const { login, isLoading } = useAuth();
+  const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
+    try {
+      setError(null);
+      await login(undefined, name || 'Demo User');
+      navigate('/');
+    } catch (err) {
+      setError('Failed to sign in. Please try again.');
+      console.error('Login error:', err);
+    }
+  };
+
+  const handleQuickLogin = async () => {
     try {
       setError(null);
       await login();
@@ -30,7 +42,7 @@ const Login: React.FC = () => {
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Project Manager</h1>
           <p className="text-gray-500 mt-2">
-            Sign in to manage your construction events
+            Photo library and project management
           </p>
         </div>
 
@@ -41,34 +53,42 @@ const Login: React.FC = () => {
           </div>
         )}
 
-        {/* Microsoft Sign In Button */}
+        {/* Name Input */}
+        <div className="mb-4">
+          <Input
+            label="Your Name (optional)"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter your name"
+          />
+        </div>
+
+        {/* Sign In Button */}
         <Button
           variant="primary"
           className="w-full py-3"
           onClick={handleLogin}
           loading={isLoading}
+          icon={<LogIn className="w-5 h-5" />}
         >
-          <svg
-            className="w-5 h-5 mr-3"
-            viewBox="0 0 21 21"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-            <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-            <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-            <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-          </svg>
-          Sign in with Microsoft
+          Sign In
         </Button>
 
+        {/* Quick Demo Login */}
+        <div className="mt-4">
+          <Button
+            variant="secondary"
+            className="w-full"
+            onClick={handleQuickLogin}
+            loading={isLoading}
+          >
+            Quick Demo Login
+          </Button>
+        </div>
+
         {/* Info */}
-        <div className="mt-8 text-center text-sm text-gray-500">
-          <p>
-            This application uses Microsoft 365 authentication.
-            <br />
-            You need a valid Microsoft account to sign in.
-          </p>
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>No account required - just enter your name or use demo mode.</p>
         </div>
 
         {/* Features */}
@@ -79,19 +99,19 @@ const Login: React.FC = () => {
           <ul className="space-y-2 text-sm text-gray-600">
             <li className="flex items-center gap-2">
               <div className="w-2 h-2 bg-primary-500 rounded-full" />
-              Manage construction event projects
+              Upload and organize photos
             </li>
             <li className="flex items-center gap-2">
               <div className="w-2 h-2 bg-primary-500 rounded-full" />
-              Create visual Gantt charts
+              Tag photos by project or category
             </li>
             <li className="flex items-center gap-2">
               <div className="w-2 h-2 bg-primary-500 rounded-full" />
-              Integrate with OneDrive
+              Search and filter your photo library
             </li>
             <li className="flex items-center gap-2">
               <div className="w-2 h-2 bg-primary-500 rounded-full" />
-              Generate invoices and reports
+              Manage projects with Gantt charts
             </li>
           </ul>
         </div>

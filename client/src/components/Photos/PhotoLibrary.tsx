@@ -206,13 +206,17 @@ const PhotoLibrary: React.FC<PhotoLibraryProps> = ({ projectId, embedded = false
     setShowOneDriveModal(true);
     try {
       const token = await getAccessToken();
-      if (token) {
-        oneDriveService.initialize(token);
-        const items = await oneDriveService.getRootItems();
-        // Filter to show folders and images only
-        setOneDriveItems(items.filter(item => item.folder || item.file?.mimeType?.startsWith('image/')));
-        setOneDrivePath([]);
+      if (!token) {
+        toast.error('OneDrive requires Microsoft authentication. Please configure Azure AD to use this feature.');
+        setShowOneDriveModal(false);
+        setOneDriveLoading(false);
+        return;
       }
+      oneDriveService.initialize(token);
+      const items = await oneDriveService.getRootItems();
+      // Filter to show folders and images only
+      setOneDriveItems(items.filter(item => item.folder || item.file?.mimeType?.startsWith('image/')));
+      setOneDrivePath([]);
     } catch (error) {
       console.error('Error loading OneDrive:', error);
       toast.error('Failed to connect to OneDrive');
