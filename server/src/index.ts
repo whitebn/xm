@@ -5,20 +5,10 @@ import { dirname, join } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import dotenv from 'dotenv';
 
-// Load environment variables
 dotenv.config();
 
-// Import routes
-import authRoutes from './routes/auth.js';
-import projectsRoutes from './routes/projects.js';
-import categoriesRoutes from './routes/categories.js';
-import filesRoutes from './routes/files.js';
 import photosRoutes from './routes/photos.js';
-import invoicesRoutes from './routes/invoices.js';
-import usersRoutes from './routes/users.js';
-import settingsRoutes from './routes/settings.js';
-import dashboardRoutes from './routes/dashboard.js';
-import reportsRoutes from './routes/reports.js';
+import projectsRoutes from './routes/projects.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,16 +31,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(UPLOAD_DIR));
 
 // API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectsRoutes);
-app.use('/api/categories', categoriesRoutes);
-app.use('/api/files', filesRoutes);
 app.use('/api/photos', photosRoutes);
-app.use('/api/invoices', invoicesRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/reports', reportsRoutes);
+app.use('/api/projects', projectsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -68,7 +50,7 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Photo Library Server running on http://localhost:${PORT}`);
 });
 
 export default app;

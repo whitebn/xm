@@ -1,7 +1,7 @@
 {
-  "name": "project-management-system",
+  "name": "photo-library",
   "version": "1.0.0",
-  "description": "Project-based management system with Gantt charts, invoicing, and OneDrive integration",
+  "description": "Searchable photo library with tagging and organization",
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
