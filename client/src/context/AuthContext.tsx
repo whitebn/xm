@@ -1,29 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { PublicClientApplication, AccountInfo, InteractionRequiredAuthError } from '@azure/msal-browser';
 import { User, UserRole } from '../types';
 
-// MSAL Configuration - Update these with your Azure AD app registration values
-const msalConfig = {
-  auth: {
-    clientId: import.meta.env.VITE_AZURE_CLIENT_ID || 'YOUR_CLIENT_ID',
-    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_AZURE_TENANT_ID || 'common'}`,
-    redirectUri: window.location.origin,
-  },
-  cache: {
-    cacheLocation: 'sessionStorage',
-    storeAuthStateInCookie: false,
-  },
-};
-
-const loginRequest = {
-  scopes: ['User.Read', 'Files.Read.All', 'Files.ReadWrite.All'],
-};
-
-const graphScopes = {
-  scopes: ['User.Read', 'Files.Read.All', 'Files.ReadWrite.All'],
-};
-
-const msalInstance = new PublicClientApplication(msalConfig);
+// Dev mode: skip Microsoft login entirely when Azure credentials are not configured
+const DEV_MODE = !import.meta.env.VITE_AZURE_CLIENT_ID || import.meta.env.VITE_AZURE_CLIENT_ID === 'your-azure-client-id';
 
 interface AuthContextType {
   user: User | null;
@@ -40,27 +19,70 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Default dev user — automatically logged in when Azure AD is not configured
+const DEV_USER: User = {
+  id: 'dev-admin-001',
+  email: 'admin@localhost.dev',
+  name: 'Local Admin',
+  role: 'admin' as UserRole,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [account, setAccount] = useState<AccountInfo | null>(null);
+  const [user, setUser] = useState<User | null>(DEV_MODE ? DEV_USER : null);
+  const [isLoading, setIsLoading] = useState(!DEV_MODE);
 
   useEffect(() => {
+    if (DEV_MODE) {
+      // In dev mode, register the dev user with the backend so API calls work
+      fetch('/api/auth/me', {
+        headers: {
+          'X-User-Email': DEV_USER.email,
+          'X-User-Name': DEV_USER.name,
+        },
+      }).then(res => {
+        if (res.ok) return res.json();
+      }).then(data => {
+        if (data?.user) setUser(data.user);
+      }).catch(() => {
+        // Backend might not be running yet, keep the local dev user
+      });
+      return;
+    }
+
+    // Production mode: use Microsoft authentication
     const initAuth = async () => {
       try {
+        const { PublicClientApplication } = await import('@azure/msal-browser');
+
+        const msalConfig = {
+          auth: {
+            clientId: import.meta.env.VITE_AZURE_CLIENT_ID,
+            authority: `https://login.microsoftonline.com/${import.meta.env.VITE_AZURE_TENANT_ID || 'common'}`,
+            redirectUri: window.location.origin,
+          },
+          cache: {
+            cacheLocation: 'sessionStorage' as const,
+            storeAuthStateInCookie: false,
+          },
+        };
+
+        const msalInstance = new PublicClientApplication(msalConfig);
         await msalInstance.initialize();
         const response = await msalInstance.handleRedirectPromise();
 
         if (response) {
-          setAccount(response.account);
-          await loadUserData(response.account);
+          await loadUserData(response.account.username, response.account.name || response.account.username, response.account.localAccountId);
         } else {
           const accounts = msalInstance.getAllAccounts();
           if (accounts.length > 0) {
-            setAccount(accounts[0]);
-            await loadUserData(accounts[0]);
+            await loadUserData(accounts[0].username, accounts[0].name || accounts[0].username, accounts[0].localAccountId);
           }
         }
+
+        // Store msalInstance for login/logout/token methods
+        (window as any).__msalInstance = msalInstance;
       } catch (error) {
         console.error('Auth initialization error:', error);
       } finally {
@@ -71,13 +93,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initAuth();
   }, []);
 
-  const loadUserData = async (msalAccount: AccountInfo) => {
+  const loadUserData = async (email: string, name: string, localId: string) => {
     try {
-      // Get user from backend or create if new
       const response = await fetch('/api/auth/me', {
         headers: {
-          'X-User-Email': msalAccount.username,
-          'X-User-Name': msalAccount.name || msalAccount.username,
+          'X-User-Email': email,
+          'X-User-Name': name,
         },
       });
 
@@ -85,23 +106,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const data = await response.json();
         setUser(data.user);
       } else {
-        // Create default user object for demo purposes
         setUser({
-          id: msalAccount.localAccountId,
-          email: msalAccount.username,
-          name: msalAccount.name || msalAccount.username,
-          role: 'admin', // Default role - backend should manage this
+          id: localId,
+          email: email,
+          name: name,
+          role: 'admin',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
       }
     } catch (error) {
       console.error('Error loading user data:', error);
-      // Fallback user for demo
       setUser({
-        id: msalAccount.localAccountId,
-        email: msalAccount.username,
-        name: msalAccount.name || msalAccount.username,
+        id: localId,
+        email: email,
+        name: name,
         role: 'admin',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -110,11 +129,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const login = async () => {
+    if (DEV_MODE) {
+      setUser(DEV_USER);
+      return;
+    }
+
     try {
       setIsLoading(true);
+      const msalInstance = (window as any).__msalInstance;
+      const loginRequest = { scopes: ['User.Read', 'Files.Read.All', 'Files.ReadWrite.All'] };
       const response = await msalInstance.loginPopup(loginRequest);
-      setAccount(response.account);
-      await loadUserData(response.account);
+      await loadUserData(response.account.username, response.account.name || response.account.username, response.account.localAccountId);
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -124,32 +149,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    if (DEV_MODE) {
+      setUser(null);
+      return;
+    }
+
     try {
+      const msalInstance = (window as any).__msalInstance;
       await msalInstance.logoutPopup({
-        account: account,
         postLogoutRedirectUri: window.location.origin,
       });
       setUser(null);
-      setAccount(null);
     } catch (error) {
       console.error('Logout error:', error);
     }
   };
 
   const getAccessToken = async (): Promise<string | null> => {
-    if (!account) return null;
+    if (DEV_MODE) return null;
+
+    const msalInstance = (window as any).__msalInstance;
+    if (!msalInstance) return null;
 
     try {
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length === 0) return null;
+      const graphScopes = { scopes: ['User.Read', 'Files.Read.All', 'Files.ReadWrite.All'] };
       const response = await msalInstance.acquireTokenSilent({
         ...graphScopes,
-        account,
+        account: accounts[0],
       });
       return response.accessToken;
     } catch (error) {
-      if (error instanceof InteractionRequiredAuthError) {
-        const response = await msalInstance.acquireTokenPopup(graphScopes);
-        return response.accessToken;
-      }
       console.error('Token acquisition error:', error);
       return null;
     }

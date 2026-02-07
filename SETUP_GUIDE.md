@@ -190,7 +190,7 @@ VITE_AZURE_CLIENT_ID=your-azure-client-id
 VITE_AZURE_TENANT_ID=your-azure-tenant-id
 ```
 
-> **For now:** Leave these as-is. You'll need real Azure credentials later for login to work (see Step 7).
+> **For now: Leave these values exactly as-is.** The app has a **built-in dev mode** that detects when Azure credentials are not configured and automatically logs you in as a local admin user. No Microsoft account needed. You get full access to all features (dashboard, projects, Gantt charts, invoices, reports, settings, users). The only features that won't work without Azure are Microsoft login and OneDrive file integration.
 
 ---
 
@@ -323,7 +323,7 @@ npm run db:setup
 ```
 
 ### The page loads but shows a blank screen or login errors
-This is likely because Azure AD is not configured. If you just want to test locally without login, see Step 8 to set up Azure, or check if the app has a dev/bypass mode.
+Make sure your `client/.env` file exists and the Azure values are left as the defaults (`your-azure-client-id`). The app auto-detects this and skips Microsoft login, logging you in as a local admin instead.
 
 ### "Cannot find module" errors
 Dependencies are missing. Run `npm run install:all` again.
