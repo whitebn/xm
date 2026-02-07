@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
   Upload,
   Tag,
   Trash2,
   FolderPlus,
+  Folder,
+  FolderOpen,
   X,
   Filter,
   Grid,
@@ -19,6 +21,13 @@ import {
   Camera,
   AlertCircle,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
+  Image,
+  SlidersHorizontal,
+  Calendar,
+  ArrowUpDown,
+  RotateCcw,
 } from 'lucide-react';
 import { Photo, PhotoTag, Project } from '../../types';
 import { photosApi, projectsApi } from '../../services/api';
@@ -73,17 +82,40 @@ const PhotoLibrary: React.FC = () => {
   // New project state
   const [newProjectName, setNewProjectName] = useState('');
 
+  // File input ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Photo detail state
   const [detailTags, setDetailTags] = useState<string[]>([]);
+
+  // Projects section state
+  const [showProjectFolders, setShowProjectFolders] = useState(true);
+  const [projectPhotoCounts, setProjectPhotoCounts] = useState<Record<string, number>>({});
+
+  // Quick tag state for single photos
+  const [quickTagPhotoId, setQuickTagPhotoId] = useState<string | null>(null);
+
+  // Advanced search state
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [minSize, setMinSize] = useState('');
+  const [maxSize, setMaxSize] = useState('');
+  const [sortBy, setSortBy] = useState<'created_at' | 'name' | 'size'>('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // Fetch photos
   const fetchPhotos = useCallback(async () => {
     try {
       setLoading(true);
-      const params: Record<string, any> = { page, pageSize: 50 };
+      const params: Record<string, any> = { page, pageSize: 50, sortBy, sortOrder };
       if (searchQuery) params.search = searchQuery;
       if (filterProject) params.projectId = filterProject;
       if (selectedTags.length > 0) params.tagIds = selectedTags.join(',');
+      if (dateFrom) params.dateFrom = dateFrom;
+      if (dateTo) params.dateTo = dateTo;
+      if (minSize) params.minSize = Number(minSize) * 1024 * 1024; // Convert MB to bytes
+      if (maxSize) params.maxSize = Number(maxSize) * 1024 * 1024; // Convert MB to bytes
 
       const response = await photosApi.getAll(params);
       if (response.data.success && response.data.data) {
@@ -97,7 +129,7 @@ const PhotoLibrary: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, searchQuery, filterProject, selectedTags]);
+  }, [page, searchQuery, filterProject, selectedTags, dateFrom, dateTo, minSize, maxSize, sortBy, sortOrder]);
 
   const fetchTags = useCallback(async () => {
     try {
@@ -201,18 +233,40 @@ const PhotoLibrary: React.FC = () => {
     }
   };
 
-  // Tag handlers
+  // Tag handlers - supports multiple tags separated by comma
   const handleCreateTag = async () => {
     if (!newTagName.trim()) return;
-    try {
-      await photosApi.createTag({ name: newTagName.trim(), color: newTagColor });
-      toast.success('Tag created');
-      setNewTagName('');
-      setNewTagColor(PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]);
-      fetchTags();
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Failed to create tag');
+
+    // Split by comma and filter empty strings
+    const tagNames = newTagName.split(',').map(t => t.trim()).filter(t => t.length > 0);
+
+    if (tagNames.length === 0) return;
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const name of tagNames) {
+      try {
+        // Assign random color to each new tag
+        const color = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)];
+        await photosApi.createTag({ name, color });
+        successCount++;
+      } catch (error: any) {
+        errorCount++;
+        console.error(`Failed to create tag "${name}":`, error);
+      }
     }
+
+    if (successCount > 0) {
+      toast.success(`Created ${successCount} tag${successCount > 1 ? 's' : ''}`);
+    }
+    if (errorCount > 0) {
+      toast.error(`${errorCount} tag${errorCount > 1 ? 's' : ''} failed (may already exist)`);
+    }
+
+    setNewTagName('');
+    setNewTagColor(PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]);
+    fetchTags();
   };
 
   const handleUpdateTag = async (id: string) => {
@@ -314,6 +368,67 @@ const PhotoLibrary: React.FC = () => {
     }
   };
 
+  // Quick tag handlers - add/remove single tag from a photo
+  const handleQuickRemoveTag = async (photoId: string, tagId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const photo = photos.find(p => p.id === photoId);
+      if (!photo) return;
+      const newTagIds = photo.tags.filter(t => t.id !== tagId).map(t => t.id);
+      await photosApi.setTags(photoId, newTagIds);
+      toast.success('Tag removed');
+      fetchPhotos();
+    } catch (error) {
+      toast.error('Failed to remove tag');
+    }
+  };
+
+  const handleQuickAddTag = async (photoId: string, tagId: string) => {
+    try {
+      const photo = photos.find(p => p.id === photoId);
+      if (!photo) return;
+      const existingTagIds = photo.tags.map(t => t.id);
+      if (existingTagIds.includes(tagId)) {
+        // Remove if already has tag
+        await photosApi.setTags(photoId, existingTagIds.filter(id => id !== tagId));
+        toast.success('Tag removed');
+      } else {
+        // Add tag
+        await photosApi.setTags(photoId, [...existingTagIds, tagId]);
+        toast.success('Tag added');
+      }
+      setQuickTagPhotoId(null);
+      fetchPhotos();
+    } catch (error) {
+      toast.error('Failed to update tag');
+    }
+  };
+
+  // Count active filters
+  const activeFilterCount = [
+    searchQuery,
+    filterProject,
+    selectedTags.length > 0,
+    dateFrom,
+    dateTo,
+    minSize,
+    maxSize,
+  ].filter(Boolean).length;
+
+  // Reset all filters
+  const resetFilters = () => {
+    setSearchQuery('');
+    setFilterProject('');
+    setSelectedTags([]);
+    setDateFrom('');
+    setDateTo('');
+    setMinSize('');
+    setMaxSize('');
+    setSortBy('created_at');
+    setSortOrder('desc');
+    setPage(1);
+  };
+
   // Toggle tag filter
   const toggleTagFilter = (tagId: string) => {
     setSelectedTags(prev => {
@@ -345,6 +460,15 @@ const PhotoLibrary: React.FC = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Badge variant="info">{total} photos</Badge>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={resetFilters}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-amber-100 text-amber-700 rounded-full hover:bg-amber-200"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''} active
+                  </button>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -353,12 +477,23 @@ const PhotoLibrary: React.FC = () => {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Search..."
+                    placeholder="Search photos..."
                     value={searchQuery}
                     onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-                    className="pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 w-40"
+                    className="pl-9 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 w-48"
                   />
                 </div>
+
+                {/* Advanced Search Toggle */}
+                <button
+                  onClick={() => setShowAdvancedSearch(!showAdvancedSearch)}
+                  className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                    showAdvancedSearch ? 'bg-primary-100 border-primary-300 text-primary-700' : 'border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                  Filters
+                </button>
 
                 {/* Project filter */}
                 <select
@@ -372,6 +507,26 @@ const PhotoLibrary: React.FC = () => {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
+
+                {/* Sort */}
+                <div className="flex items-center gap-1">
+                  <select
+                    value={sortBy}
+                    onChange={(e) => { setSortBy(e.target.value as 'created_at' | 'name' | 'size'); setPage(1); }}
+                    className="px-2 py-1.5 text-sm border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="created_at">Date</option>
+                    <option value="name">Name</option>
+                    <option value="size">Size</option>
+                  </select>
+                  <button
+                    onClick={() => { setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); setPage(1); }}
+                    className="p-1.5 border border-l-0 border-gray-300 rounded-r-lg hover:bg-gray-50"
+                    title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                  >
+                    <ArrowUpDown className={`w-4 h-4 ${sortOrder === 'asc' ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
 
                 {/* View toggle */}
                 <div className="flex border border-gray-300 rounded-lg overflow-hidden">
@@ -401,6 +556,75 @@ const PhotoLibrary: React.FC = () => {
               </div>
             </div>
 
+            {/* Advanced Search Panel */}
+            {showAdvancedSearch && (
+              <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Date Range */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      <Calendar className="w-3 h-3 inline mr-1" />
+                      From Date
+                    </label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      <Calendar className="w-3 h-3 inline mr-1" />
+                      To Date
+                    </label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+
+                  {/* File Size Range */}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Min Size (MB)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={minSize}
+                      onChange={(e) => { setMinSize(e.target.value); setPage(1); }}
+                      placeholder="0"
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Max Size (MB)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={maxSize}
+                      onChange={(e) => { setMaxSize(e.target.value); setPage(1); }}
+                      placeholder="Any"
+                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-2 flex justify-end">
+                  <button
+                    onClick={resetFilters}
+                    className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Reset all filters
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Tag Filters */}
             {tags.length > 0 && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -427,6 +651,76 @@ const PhotoLibrary: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* Project Folders Section */}
+          {projects.length > 0 && (
+            <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+              <button
+                onClick={() => setShowProjectFolders(!showProjectFolders)}
+                className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 mb-2"
+              >
+                {showProjectFolders ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                Project Folders ({projects.length})
+              </button>
+              {showProjectFolders && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                  {/* All Photos */}
+                  <button
+                    onClick={() => { setFilterProject(''); setPage(1); }}
+                    className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                      filterProject === '' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Image className={`w-8 h-8 mb-1 ${filterProject === '' ? 'text-primary-600' : 'text-gray-400'}`} />
+                    <span className={`text-xs font-medium truncate w-full text-center ${filterProject === '' ? 'text-primary-700' : 'text-gray-700'}`}>
+                      All Photos
+                    </span>
+                    <span className="text-xs text-gray-500">{total}</span>
+                  </button>
+                  {/* Unassigned */}
+                  <button
+                    onClick={() => { setFilterProject('none'); setPage(1); }}
+                    className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                      filterProject === 'none' ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Folder className={`w-8 h-8 mb-1 ${filterProject === 'none' ? 'text-primary-600' : 'text-gray-400'}`} />
+                    <span className={`text-xs font-medium truncate w-full text-center ${filterProject === 'none' ? 'text-primary-700' : 'text-gray-700'}`}>
+                      Unassigned
+                    </span>
+                  </button>
+                  {/* Project Folders */}
+                  {projects.map(project => (
+                    <button
+                      key={project.id}
+                      onClick={() => { setFilterProject(project.id); setPage(1); }}
+                      className={`flex flex-col items-center p-3 rounded-lg border-2 transition-all ${
+                        filterProject === project.id ? 'border-primary-500 bg-primary-50' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {filterProject === project.id ? (
+                        <FolderOpen className="w-8 h-8 mb-1 text-primary-600" />
+                      ) : (
+                        <Folder className="w-8 h-8 mb-1 text-amber-500" />
+                      )}
+                      <span className={`text-xs font-medium truncate w-full text-center ${filterProject === project.id ? 'text-primary-700' : 'text-gray-700'}`}>
+                        {project.name}
+                      </span>
+                      <span className="text-xs text-gray-500">{project.photoCount || 0}</span>
+                    </button>
+                  ))}
+                  {/* Add Project Button */}
+                  <button
+                    onClick={() => setShowProjectModal(true)}
+                    className="flex flex-col items-center justify-center p-3 rounded-lg border-2 border-dashed border-gray-300 bg-white hover:border-primary-400 hover:bg-primary-50 transition-all"
+                  >
+                    <Plus className="w-8 h-8 mb-1 text-gray-400" />
+                    <span className="text-xs font-medium text-gray-500">New Project</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Selection Bar */}
           {selectedPhotos.size > 0 && (
@@ -503,23 +797,66 @@ const PhotoLibrary: React.FC = () => {
                         <div className="p-2 bg-white">
                           <p className="text-sm font-medium truncate">{photo.name}</p>
                           <p className="text-xs text-gray-500">{formatSize(photo.size)}</p>
-                          {photo.tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {photo.tags.slice(0, 3).map(tag => (
-                                <span key={tag.id} className="px-1.5 py-0.5 text-xs rounded-full text-white" style={{ backgroundColor: tag.color }}>
-                                  {tag.name}
-                                </span>
-                              ))}
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {photo.tags.slice(0, 3).map(tag => (
+                              <span
+                                key={tag.id}
+                                className="group/tag inline-flex items-center gap-0.5 px-1.5 py-0.5 text-xs rounded-full text-white cursor-pointer hover:opacity-80"
+                                style={{ backgroundColor: tag.color }}
+                                onClick={(e) => handleQuickRemoveTag(photo.id, tag.id, e)}
+                                title="Click to remove tag"
+                              >
+                                {tag.name}
+                                <X className="w-3 h-3 opacity-0 group-hover/tag:opacity-100" />
+                              </span>
+                            ))}
+                            {photo.tags.length > 3 && (
+                              <span className="px-1.5 py-0.5 text-xs rounded-full bg-gray-200 text-gray-600">
+                                +{photo.tags.length - 3}
+                              </span>
+                            )}
+                            {/* Quick add tag button */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setQuickTagPhotoId(quickTagPhotoId === photo.id ? null : photo.id); }}
+                              className="px-1.5 py-0.5 text-xs rounded-full border border-dashed border-gray-300 text-gray-400 hover:border-primary-400 hover:text-primary-500 hover:bg-primary-50"
+                              title="Add tag"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                          {/* Quick tag dropdown */}
+                          {quickTagPhotoId === photo.id && (
+                            <div className="absolute left-2 right-2 z-20 mt-1 p-2 bg-white rounded-lg shadow-lg border">
+                              <div className="flex flex-wrap gap-1">
+                                {tags.map(tag => {
+                                  const hasTag = photo.tags.some(t => t.id === tag.id);
+                                  return (
+                                    <button
+                                      key={tag.id}
+                                      onClick={(e) => { e.stopPropagation(); handleQuickAddTag(photo.id, tag.id); }}
+                                      className="flex items-center gap-1 px-2 py-1 text-xs rounded-full border"
+                                      style={{
+                                        backgroundColor: hasTag ? tag.color : 'white',
+                                        borderColor: tag.color,
+                                        color: hasTag ? 'white' : tag.color,
+                                      }}
+                                    >
+                                      {hasTag && <Check className="w-3 h-3" />}
+                                      {tag.name}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                         </div>
 
-                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity flex items-center justify-center opacity-0 group-hover:opacity-100">
-                          <div className="flex gap-2">
-                            <button onClick={() => handleDownload(photo)} className="p-2 bg-white rounded-full hover:bg-gray-100 shadow-md">
+                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
+                          <div className="flex gap-2 pointer-events-auto">
+                            <button onClick={(e) => { e.stopPropagation(); handleDownload(photo); }} className="p-2 bg-white rounded-full hover:bg-gray-100 shadow-md">
                               <Download className="w-4 h-4" />
                             </button>
-                            <button onClick={() => handleDelete(photo.id)} className="p-2 bg-white rounded-full hover:bg-gray-100 shadow-md text-red-600">
+                            <button onClick={(e) => { e.stopPropagation(); handleDelete(photo.id); }} className="p-2 bg-white rounded-full hover:bg-gray-100 shadow-md text-red-600">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
@@ -530,17 +867,63 @@ const PhotoLibrary: React.FC = () => {
                 ) : (
                   <div className="divide-y">
                     {photos.map((photo) => (
-                      <div key={photo.id} className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-50 ${selectedPhotos.has(photo.id) ? 'bg-primary-50' : ''}`}>
+                      <div key={photo.id} className={`relative flex items-center gap-3 px-4 py-3 hover:bg-gray-50 ${selectedPhotos.has(photo.id) ? 'bg-primary-50' : ''}`}>
                         <button onClick={() => toggleSelect(photo.id)}>
                           {selectedPhotos.has(photo.id) ? <CheckSquare className="w-4 h-4 text-primary-600" /> : <Square className="w-4 h-4 text-gray-400" />}
                         </button>
                         <div className="w-12 h-12 bg-gray-100 rounded overflow-hidden cursor-pointer" onClick={() => openPhotoDetail(photo)}>
                           <img src={photosApi.getPreviewUrl(photo.id)} alt={photo.name} className="w-full h-full object-cover" />
                         </div>
-                        <div className="flex-1 cursor-pointer" onClick={() => openPhotoDetail(photo)}>
-                          <p className="font-medium">{photo.name}</p>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium truncate cursor-pointer" onClick={() => openPhotoDetail(photo)}>{photo.name}</p>
                           <p className="text-sm text-gray-500">{formatSize(photo.size)}</p>
                         </div>
+                        {/* Tags column */}
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {photo.tags.map(tag => (
+                            <span
+                              key={tag.id}
+                              className="group/tag inline-flex items-center gap-0.5 px-2 py-0.5 text-xs rounded-full text-white cursor-pointer hover:opacity-80"
+                              style={{ backgroundColor: tag.color }}
+                              onClick={(e) => handleQuickRemoveTag(photo.id, tag.id, e)}
+                              title="Click to remove tag"
+                            >
+                              {tag.name}
+                              <X className="w-3 h-3 opacity-0 group-hover/tag:opacity-100" />
+                            </span>
+                          ))}
+                          <button
+                            onClick={() => setQuickTagPhotoId(quickTagPhotoId === photo.id ? null : photo.id)}
+                            className="px-2 py-0.5 text-xs rounded-full border border-dashed border-gray-300 text-gray-400 hover:border-primary-400 hover:text-primary-500"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                        {/* Quick tag dropdown for list view */}
+                        {quickTagPhotoId === photo.id && (
+                          <div className="absolute right-16 top-full z-20 mt-1 p-2 bg-white rounded-lg shadow-lg border min-w-48">
+                            <div className="flex flex-wrap gap-1">
+                              {tags.map(tag => {
+                                const hasTag = photo.tags.some(t => t.id === tag.id);
+                                return (
+                                  <button
+                                    key={tag.id}
+                                    onClick={() => handleQuickAddTag(photo.id, tag.id)}
+                                    className="flex items-center gap-1 px-2 py-1 text-xs rounded-full border"
+                                    style={{
+                                      backgroundColor: hasTag ? tag.color : 'white',
+                                      borderColor: tag.color,
+                                      color: hasTag ? 'white' : tag.color,
+                                    }}
+                                  >
+                                    {hasTag && <Check className="w-3 h-3" />}
+                                    {tag.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1">
                           <button onClick={() => handleDownload(photo)} className="p-1.5 hover:bg-gray-200 rounded">
                             <Download className="w-4 h-4" />
@@ -586,9 +969,10 @@ const PhotoLibrary: React.FC = () => {
           >
             <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
             <p className="text-lg font-medium">Drag and drop photos here</p>
-            <label className="mt-4 inline-block cursor-pointer">
-              <Button variant="primary" onClick={() => {}}>Browse Files</Button>
+            <div className="mt-4">
+              <Button variant="primary" onClick={() => fileInputRef.current?.click()}>Browse Files</Button>
               <input
+                ref={fileInputRef}
                 type="file"
                 multiple
                 accept="image/*"
@@ -599,7 +983,7 @@ const PhotoLibrary: React.FC = () => {
                 }}
                 className="hidden"
               />
-            </label>
+            </div>
           </div>
 
           {uploadFiles.length > 0 && (
@@ -656,25 +1040,16 @@ const PhotoLibrary: React.FC = () => {
       <Modal isOpen={showTagManager} onClose={() => setShowTagManager(false)} title="Manage Tags" size="md">
         <div className="p-4 space-y-4">
           <div>
-            <p className="text-sm font-medium mb-2">Create New Tag</p>
+            <p className="text-sm font-medium mb-1">Create New Tags</p>
+            <p className="text-xs text-gray-500 mb-2">Separate multiple tags with commas (e.g., "Nature, Landscape, Mountains")</p>
             <div className="flex items-center gap-2">
               <Input
                 value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
-                placeholder="Tag name"
+                placeholder="Tag names (comma separated)"
                 className="flex-1"
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
               />
-              <div className="flex gap-1">
-                {PRESET_COLORS.slice(0, 5).map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setNewTagColor(color)}
-                    className={`w-6 h-6 rounded-full border-2 ${newTagColor === color ? 'border-gray-800' : 'border-transparent'}`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
               <Button variant="primary" onClick={handleCreateTag} icon={<Plus className="w-4 h-4" />}>Add</Button>
             </div>
           </div>

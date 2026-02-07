@@ -88,7 +88,20 @@ const formatTag = (row: any): FormattedTag => ({
 // Get all photos with optional filters
 router.get('/', (req, res) => {
   try {
-    const { search, projectId, tagIds, page = 1, pageSize = 50 } = req.query;
+    const {
+      search,
+      projectId,
+      tagIds,
+      dateFrom,
+      dateTo,
+      minSize,
+      maxSize,
+      mimeType,
+      sortBy = 'created_at',
+      sortOrder = 'desc',
+      page = 1,
+      pageSize = 50
+    } = req.query;
     const offset = (Number(page) - 1) * Number(pageSize);
 
     let query = 'SELECT DISTINCT p.* FROM photos p';
@@ -105,7 +118,7 @@ router.get('/', (req, res) => {
       }
     }
 
-    // Filter by search term
+    // Filter by search term (searches name)
     if (search) {
       conditions.push('p.name LIKE ?');
       params.push(`%${search}%`);
@@ -119,6 +132,32 @@ router.get('/', (req, res) => {
       params.push(...tags);
     }
 
+    // Filter by date range
+    if (dateFrom) {
+      conditions.push('p.created_at >= ?');
+      params.push(dateFrom);
+    }
+    if (dateTo) {
+      conditions.push('p.created_at <= ?');
+      params.push(dateTo + ' 23:59:59');
+    }
+
+    // Filter by file size
+    if (minSize) {
+      conditions.push('p.size >= ?');
+      params.push(Number(minSize));
+    }
+    if (maxSize) {
+      conditions.push('p.size <= ?');
+      params.push(Number(maxSize));
+    }
+
+    // Filter by mime type
+    if (mimeType) {
+      conditions.push('p.mime_type LIKE ?');
+      params.push(`${mimeType}%`);
+    }
+
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
@@ -128,8 +167,11 @@ router.get('/', (req, res) => {
     const totalRow = db.prepare(countQuery).get(...params) as { total: number };
     const total = totalRow?.total || 0;
 
-    // Add pagination
-    query += ' ORDER BY p.created_at DESC LIMIT ? OFFSET ?';
+    // Add sorting and pagination
+    const validSortFields = ['created_at', 'name', 'size'];
+    const sortField = validSortFields.includes(sortBy as string) ? sortBy : 'created_at';
+    const order = sortOrder === 'asc' ? 'ASC' : 'DESC';
+    query += ` ORDER BY p.${sortField} ${order} LIMIT ? OFFSET ?`;
     params.push(Number(pageSize), offset);
 
     const rows = db.prepare(query).all(...params) as any[];

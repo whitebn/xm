@@ -8,9 +8,25 @@ const api = axios.create({
   },
 });
 
+// Search parameters interface
+export interface PhotoSearchParams {
+  search?: string;
+  projectId?: string;
+  tagIds?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  minSize?: number;
+  maxSize?: number;
+  mimeType?: string;
+  sortBy?: 'created_at' | 'name' | 'size';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
 // Photos API
 export const photosApi = {
-  getAll: (params?: { search?: string; projectId?: string; tagIds?: string; page?: number; pageSize?: number }) =>
+  getAll: (params?: PhotoSearchParams) =>
     api.get<{ success: boolean; data: PaginatedResponse<Photo> }>('/photos', { params }),
 
   getById: (id: string) =>

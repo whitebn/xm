@@ -23,6 +23,7 @@ export interface Project {
   name: string;
   description: string | null;
   createdAt: string;
+  photoCount?: number;
 }
 
 export interface ApiResponse<T> {

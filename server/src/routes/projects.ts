@@ -9,6 +9,7 @@ interface Project {
   name: string;
   description: string | null;
   createdAt: string;
+  photoCount?: number;
 }
 
 const formatProject = (row: any): Project => ({
@@ -16,12 +17,19 @@ const formatProject = (row: any): Project => ({
   name: row.name,
   description: row.description,
   createdAt: row.created_at,
+  photoCount: row.photo_count ?? 0,
 });
 
-// Get all projects
+// Get all projects with photo counts
 router.get('/', (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM projects ORDER BY name ASC').all() as any[];
+    const rows = db.prepare(`
+      SELECT p.*, COUNT(ph.id) as photo_count
+      FROM projects p
+      LEFT JOIN photos ph ON ph.project_id = p.id
+      GROUP BY p.id
+      ORDER BY p.name ASC
+    `).all() as any[];
     res.json({ success: true, data: rows.map(formatProject) });
   } catch (error) {
     console.error('Error getting projects:', error);
