@@ -38,6 +38,8 @@ pip install -e '.[ai,places,heic]'
 - `places` adds offline place names for trips (reverse_geocoder).
 - `heic` lets Pillow read iPhone HEIC files (pillow-heif).
 
+Run the tests from this folder: `cd photo-sorter && python -m unittest discover -s tests`
+
 ## How each piece works
 
 **Dates.** EXIF capture date first, then a date in the filename (`IMG_20240305_...`), then file modified time. The summary shows how many files fell into each bucket. Modified time is unreliable after a copy, so those files are never used to detect trips.
