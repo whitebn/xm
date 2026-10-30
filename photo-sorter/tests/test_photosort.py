@@ -237,5 +237,87 @@ class TestSearch(Fixture):
         self.assertEqual(idx.search("beach"), [])  # re-upsert replaces the FTS row
 
 
+class TestGallery(Fixture):
+    def setUp(self):
+        super().setUp()
+        import threading
+        import urllib.request
+        from photosort import gallery
+
+        self.urlopen = urllib.request.urlopen
+        found = trips.build_trips(self.items, trips.find_home(self.items))
+        trips.name_trips(found, geocode=lambda pts: [{"name": "Lisbon", "cc": "PT"}] * len(pts))
+        acts = organize.plan(self.items, found, self.dest)
+        organize.apply(acts, self.dest)
+        self.idx = Index(self.dest / ".photosort" / "index.db")
+        for a in acts:
+            m = a.media
+            self.idx.upsert(str(a.dst), {"sha": m.sha, "kind": m.kind, "taken_at": m.taken_at, "taken_source": m.taken_source,
+                                         "trip": a.trip, "caption": "<img src=x onerror=alert(1)> beach" if m.path.name == "trip0.jpg" else "",
+                                         "tags": ["beach"] if m.path.name == "trip0.jpg" else []})
+        self.srv = gallery.serve(self.dest, 0)
+        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.idx.close()
+        super().tearDown()
+
+    def get(self, path):
+        import urllib.error
+        try:
+            with self.urlopen(self.base + path) as r:
+                return r.status, r.headers.get_content_type(), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, "", b""
+
+    def test_binds_to_loopback_only(self):
+        self.assertEqual(self.srv.server_address[0], "127.0.0.1")
+
+    def test_page_and_facets(self):
+        self.assertEqual(self.get("/")[:2], (200, "text/html"))
+        _, _, body = self.get("/api/facets")
+        f = json.loads(body)
+        self.assertEqual(f["total"], len(self.items))
+        self.assertEqual(f["tagged"], 1)
+        self.assertEqual(f["trips"][0]["value"], "2024-06 Lisbon PT")
+
+    def test_search_thumb_and_original(self):
+        _, _, body = self.get("/api/search?q=beach")
+        res = json.loads(body)["results"]
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["caption"], "<img src=x onerror=alert(1)> beach")  # returned as data, page renders it as text
+        code, ctype, data = self.get(f"/thumb/{res[0]['id']}")
+        self.assertEqual((code, ctype), (200, "image/jpeg"))
+        self.assertEqual(Image.open(__import__("io").BytesIO(data)).format, "JPEG")
+        self.assertEqual(self.get(f"/file/{res[0]['id']}")[:2], (200, "image/jpeg"))
+
+    def test_filters_and_paging(self):
+        _, _, body = self.get("/api/search?trip=Lisbon&kind=photo")
+        self.assertEqual(len(json.loads(body)["results"]), 7)
+        _, _, body = self.get("/api/search?year=2024&month=6")
+        self.assertTrue(all(r["trip"] for r in json.loads(body)["results"]))
+
+    def test_cannot_serve_files_outside_library(self):
+        outside = self.tmp / "secret.txt"
+        outside.write_text("secret")
+        self.idx.upsert(str(outside), {"sha": "x", "kind": "photo", "taken_at": None, "taken_source": "none"})
+        row = self.idx.db.execute("SELECT rowid FROM files WHERE path=?", (str(outside),)).fetchone()
+        self.assertEqual(self.get(f"/file/{row[0]}")[0], 404)
+        self.assertEqual(self.get(f"/thumb/{row[0]}")[0], 404)
+
+    def test_unknown_routes_and_ids(self):
+        for path in ("/file/99999", "/thumb/99999", "/file/abc", "/../etc/passwd", "/nope"):
+            self.assertEqual(self.get(path)[0], 404, path)
+
+    def test_video_has_no_thumb_but_serves(self):
+        _, _, body = self.get("/api/search?kind=video")
+        vid = json.loads(body)["results"][0]
+        self.assertEqual(self.get(f"/thumb/{vid['id']}")[0], 404)
+        self.assertEqual(self.get(f"/file/{vid['id']}")[0], 200)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -52,9 +52,9 @@ class Index:
         )
         self.db.commit()
 
-    def search(self, query: str = "", year=None, month=None, trip=None, kind=None, limit=50) -> list[sqlite3.Row]:
+    def search(self, query: str = "", year=None, month=None, trip=None, kind=None, limit=50, offset=0) -> list[sqlite3.Row]:
         where, args = [], []
-        sql = "SELECT f.* FROM files f"
+        sql = "SELECT f.rowid AS id, f.* FROM files f"
         words = re.findall(r"\w+", query)
         if words:
             sql += " JOIN files_fts ON files_fts.path = f.path"
@@ -69,5 +69,21 @@ class Index:
             args.append(f"%{trip}%")
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY f.taken_at DESC LIMIT ?"
-        return self.db.execute(sql, (*args, limit)).fetchall()
+        sql += " ORDER BY f.taken_at DESC, f.rowid DESC LIMIT ? OFFSET ?"
+        return self.db.execute(sql, (*args, limit, offset)).fetchall()
+
+    def get(self, file_id: int) -> sqlite3.Row | None:
+        return self.db.execute("SELECT rowid AS id, * FROM files WHERE rowid=?", (file_id,)).fetchone()
+
+    def facets(self) -> dict:
+        q = lambda sql: [dict(r) for r in self.db.execute(sql)]
+        return {
+            "years": q("SELECT year AS value, COUNT(*) AS n FROM files WHERE year IS NOT NULL GROUP BY year ORDER BY year DESC"),
+            "trips": q("SELECT trip AS value, COUNT(*) AS n FROM files WHERE trip != '' GROUP BY trip ORDER BY MIN(taken_at) DESC"),
+            "kinds": q("SELECT kind AS value, COUNT(*) AS n FROM files GROUP BY kind ORDER BY n DESC"),
+            "tagged": self.db.execute("SELECT COUNT(*) FROM files WHERE caption != ''").fetchone()[0],
+            "total": self.db.execute("SELECT COUNT(*) FROM files").fetchone()[0],
+        }
+
+    def close(self) -> None:
+        self.db.close()

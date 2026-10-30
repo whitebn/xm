@@ -103,6 +103,23 @@ def cmd_search(a) -> int:
     return 0
 
 
+def cmd_gallery(a) -> int:
+    import webbrowser
+
+    from .gallery import serve
+
+    srv = serve(Path(a.library).resolve(), a.port)
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    print(f"Gallery at {url}  (local only, Ctrl+C to stop)")
+    if a.open:
+        webbrowser.open(url)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def cmd_undo(a) -> int:
     done, problems = organize.undo(Path(a.manifest))
     print(f"Reverted {done} file(s).")
@@ -142,6 +159,12 @@ def main(argv=None) -> int:
     q.add_argument("--kind", choices=["photo", "screenshot", "video"])
     q.add_argument("--limit", type=int, default=50)
     q.set_defaults(fn=cmd_search)
+
+    g = sub.add_parser("gallery", help="browse and search a sorted library in your browser")
+    g.add_argument("library")
+    g.add_argument("--port", type=int, default=8765)
+    g.add_argument("--open", action="store_true", help="open the browser")
+    g.set_defaults(fn=cmd_gallery)
 
     u = sub.add_parser("undo", help="reverse a sort using its manifest")
     u.add_argument("manifest")

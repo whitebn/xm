@@ -15,3 +15,6 @@ photosort = "photosort.cli:main"
 
 [tool.setuptools]
 packages = ["photosort"]
+
+[tool.setuptools.package-data]
+photosort = ["gallery.html"]

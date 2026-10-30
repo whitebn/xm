@@ -11,8 +11,11 @@ photosort sort ~/Downloads/camera-dump --dest ~/Pictures/Library            # dr
 photosort sort ~/Downloads/camera-dump --dest ~/Pictures/Library --apply    # copies files
 photosort sort ... --ai --apply                                             # also tags with Claude
 photosort search ~/Pictures/Library sunset beach --year 2024
+photosort gallery ~/Pictures/Library --open                                 # browse and search in your browser
 photosort undo ~/Pictures/Library/.photosort/manifest-YYYYMMDD-HHMMSS.json
 ```
+
+The gallery is a local page on 127.0.0.1 (not reachable from other devices, no login). It has search, year, month, trip and type filters, a viewer with captions, tags and GPS, and keyboard arrows. Clicking a tag searches it. It is read-only. Videos open in the viewer but get no thumbnail, and seeking inside long videos is not supported.
 
 Resulting layout:
 
@@ -58,8 +61,8 @@ The product page says photos never leave your computer because it runs inside yo
 
 ## What is and is not verified
 
-Verified by the 20 tests in `tests/` and an end-to-end run on synthetic images:
-EXIF and GPS parsing (including west/south signs), filename dates, home and trip detection, no-GPS fallback, layout, duplicates, filename collisions, copy and move, undo (including refusing to delete an edited copy), full-text search, and the offline place lookup.
+Verified by the 27 tests in `tests/` and an end-to-end run on synthetic images:
+EXIF and GPS parsing (including west/south signs), filename dates, home and trip detection, no-GPS fallback, layout, duplicates, filename collisions, copy and move, undo (including refusing to delete an edited copy), full-text search, the offline place lookup, and the gallery server (including that it refuses files outside the library). The gallery page was also driven in headless Chromium on desktop and phone widths with no console errors.
 
 Not verified:
 - **Live Claude calls.** There was no API key in the build environment. The request shape was checked against the installed SDK types (`anthropic` 2.3.0) and a fake client, but never sent. Run it on 10 photos first.
@@ -67,9 +70,20 @@ Not verified:
 - **HEIC, RAW, very large libraries.** Untested. The scan hashes every file and is single-threaded.
 - **Video tagging.** Not supported. Videos are sorted by date and trip only, and their dates usually come from file modified time.
 
+## Prior art (checked October 2026, one pass, not exhaustive)
+
+This is not a new idea. Things I read:
+
+- [PixelDump](https://pypi.org/project/pixeldump/) is the closest match. Its page says it sorts a camera roll with vision models (Claude Code, the Claude API, or local Ollama), groups photos into events using EXIF dates plus GPS clustering, defaults to a dry run, logs a reversible manifest, and is MIT licensed. The page does not mention per-photo tags, a search index or a gallery.
+- [Elodie](https://github.com/jmathai/elodie) is an older Python EXIF organizer that files by date and GPS location. It does not mention trips, AI tagging or search.
+- [NameForge](https://github.com/frontmesh/nameforge) renames files from EXIF, GPS place names and optional local Ollama vision analysis. It does not mention trips, tags, search or a gallery.
+- Immich, PhotoPrism and LibrePhotos are full self-hosted photo apps with AI search. I only saw third-party roundups for these, not their own pages, so verify their features yourself.
+- I found nothing public for Yanny Studio's "Sort my footage".
+
+What this project adds over the ones I read: trips plus Claude captions plus full-text search plus a gallery, in one small tool with no server to run. Whether that is worth having over PixelDump or Immich is a fair question. I have not installed or run any of them.
+
 ## Ideas for next steps
 
 - Batch API for bulk tagging at lower cost.
 - Local-only tagger.
-- A small web gallery over `index.db`.
 - Video dates from `ffprobe`, and tags from a few extracted frames.
