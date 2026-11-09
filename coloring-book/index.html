@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Coloring Book</title>
+  <meta name="description" content="A coloring book for little hands. Import a PDF, tap to fill, paint with a highlighter brush, and swipe between pages.">
+  <meta name="theme-color" content="#ffd84d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Coloring">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Icons -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-fill" viewBox="0 0 24 24"><path d="M4.5 12.2 11 5.7a1.6 1.6 0 0 1 2.3 0l5.6 5.6a1.6 1.6 0 0 1 0 2.3l-5.4 5.4a2.6 2.6 0 0 1-3.7 0l-5.3-5.3a1.6 1.6 0 0 1 0-1.5z"/><path d="M8 3.5l3.2 3.2M21 15.5c0 1.3-.9 2.3-2 2.3s-2-1-2-2.3c0-1.2 2-3.5 2-3.5s2 2.3 2 3.5z"/><path d="M5 12.5h12.6"/></symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24"><path d="M20.5 3.5 12 12"/><path d="M9.8 11.3c2.3-.4 4.1 1.5 3.5 3.8-.6 2.4-3 4.1-6.3 4.1-1.6 0-2.7-.2-3.5-.6 1.7-.8 1.9-2 2-3.1.2-2.2 1.6-3.8 4.3-4.2z"/></symbol>
+    <symbol id="i-eraser" viewBox="0 0 24 24"><path d="m4.5 14.5 8.8-8.8a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L12.2 19.5H8z"/><path d="M8 19.5H20.5M8.2 10.8l5.8 5.8"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H9"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9.5" rx="2.2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5"/></symbol>
+    <symbol id="i-books" viewBox="0 0 24 24"><path d="M4 19.5V5.5A1.5 1.5 0 0 1 5.5 4H11v15.5M11 4h5.5A1.5 1.5 0 0 1 18 5.5v14M4 19.5h16M14 8.5h1.5"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L13 19V5L7.5 9.5H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L13 19V5L7.5 9.5H4z"/><path d="m16.5 9.5 5 5M21.5 9.5l-5 5"/></symbol>
+    <symbol id="i-lines" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" stroke-dasharray="3 2.5"/><path d="M8 14c2-4 4-4 8-5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  </defs>
+</svg>
+
+<!-- ================= Library ================= -->
+<main id="library" class="screen">
+  <div class="library-inner">
+    <h1><span>C</span><span>o</span><span>l</span><span>o</span><span>r</span><span>i</span><span>n</span><span>g</span> <span>B</span><span>o</span><span>o</span><span>k</span></h1>
+    <p class="sub">Pick a book to color</p>
+    <div id="shelf" class="shelf">
+      <button id="addBtn" class="card card-add" type="button">
+        <svg class="icon big"><use href="#i-plus"/></svg>
+        <strong>Add a PDF</strong>
+        <small>Pick a coloring book from your device</small>
+      </button>
+      <button id="sampleBtn" class="card" type="button">
+        <span class="thumb sample-thumb" aria-hidden="true">
+          <svg viewBox="0 0 60 60" width="64" height="64"><circle cx="30" cy="30" r="12" fill="none" stroke="#222" stroke-width="3"/><g stroke="#222" stroke-width="3" stroke-linecap="round"><path d="M30 6v7M30 47v7M6 30h7M47 30h7M13 13l5 5M42 42l5 5M47 13l-5 5M18 42l-5 5"/></g></svg>
+        </span>
+        <strong>Sample book</strong>
+        <small>6 pictures to try</small>
+      </button>
+    </div>
+    <p class="tip">Tip: you can also drag a PDF onto this page on a computer.</p>
+  </div>
+</main>
+
+<!-- ================= Coloring screen ================= -->
+<div id="book" class="screen" hidden>
+  <header class="topbar">
+    <button id="menuBtn" class="round hold" type="button" aria-label="Grown-ups menu. Press and hold to open.">
+      <svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/></svg>
+      <svg class="icon"><use href="#i-lock"/></svg>
+    </button>
+    <div class="pager">
+      <button id="prevBtn" class="round" type="button" aria-label="Previous page"><svg class="icon"><use href="#i-prev"/></svg></button>
+      <button id="counter" class="counter" type="button" aria-label="See all pages"><svg class="icon small"><use href="#i-grid"/></svg><span id="counterText">1 / 1</span></button>
+      <button id="nextBtn" class="round" type="button" aria-label="Next page"><svg class="icon"><use href="#i-next"/></svg></button>
+    </div>
+    <button id="undoBtn" class="round" type="button" aria-label="Undo" disabled><svg class="icon"><use href="#i-undo"/></svg></button>
+  </header>
+
+  <div id="stage"><div id="track"></div></div>
+
+  <footer class="toolbar">
+    <div class="toolrow">
+      <div class="tools" role="radiogroup" aria-label="Tools">
+        <button class="tool" data-tool="fill" role="radio" type="button"><svg class="icon"><use href="#i-fill"/></svg><span>Fill</span></button>
+        <button class="tool" data-tool="brush" role="radio" type="button"><svg class="icon"><use href="#i-brush"/></svg><span>Paint</span></button>
+        <button class="tool" data-tool="eraser" role="radio" type="button"><svg class="icon"><use href="#i-eraser"/></svg><span>Erase</span></button>
+      </div>
+      <div class="sizes" id="sizes" role="radiogroup" aria-label="Brush size">
+        <button class="size" data-size="0" role="radio" type="button" aria-label="Small brush"><i></i></button>
+        <button class="size" data-size="1" role="radio" type="button" aria-label="Medium brush"><i></i></button>
+        <button class="size" data-size="2" role="radio" type="button" aria-label="Big brush"><i></i></button>
+      </div>
+    </div>
+    <div class="palette" id="palette" role="radiogroup" aria-label="Colors"></div>
+  </footer>
+</div>
+
+<!-- ================= Overlays ================= -->
+<div id="menu" class="overlay" hidden>
+  <div class="sheet" role="dialog" aria-label="Grown-ups menu">
+    <h2>Grown-ups</h2>
+    <div class="menu-list">
+      <button id="mLibrary" type="button"><svg class="icon"><use href="#i-books"/></svg>All books</button>
+      <button id="mAdd" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add a PDF</button>
+      <button id="mSave" type="button"><svg class="icon"><use href="#i-download"/></svg>Save this picture</button>
+      <button id="mClear" type="button"><svg class="icon"><use href="#i-trash"/></svg>Clear this page</button>
+      <button id="mLines" type="button" role="switch"><svg class="icon"><use href="#i-lines"/></svg><span>Paint brush stays inside the lines</span><b class="pill" id="mLinesState">Off</b></button>
+      <button id="mSound" type="button" role="switch"><svg class="icon"><use href="#i-sound"/></svg><span>Sounds</span><b class="pill" id="mSoundState">On</b></button>
+    </div>
+    <button id="mClose" class="primary" type="button">Done</button>
+  </div>
+</div>
+
+<div id="pages" class="overlay" hidden>
+  <div class="sheet wide" role="dialog" aria-label="All pages">
+    <div class="sheet-head"><h2>Pick a picture</h2><button id="pagesClose" class="round small" type="button" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div id="pageGrid" class="page-grid"></div>
+  </div>
+</div>
+
+<div id="confirm" class="overlay" hidden>
+  <div class="sheet" role="alertdialog" aria-labelledby="confirmText">
+    <p id="confirmText"></p>
+    <div class="row">
+      <button id="confirmNo" type="button">Cancel</button>
+      <button id="confirmYes" class="danger" type="button">Yes</button>
+    </div>
+  </div>
+</div>
+
+<div id="hint" class="hint" hidden>
+  <p><b>Tap a color</b>, then tap a picture to fill it.<br><b>Paint</b> draws like a highlighter.<br>Swipe with <b>two fingers</b> or use the arrows to turn the page.</p>
+  <button id="hintOk" type="button" class="primary">Got it</button>
+</div>
+
+<div id="busy" class="busy" hidden><div class="spinner"><i></i><i></i><i></i></div><p id="busyText">Getting your book ready…</p></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="dropzone" class="dropzone" hidden>Drop your PDF here</div>
+
+<input id="file" type="file" accept="application/pdf,.pdf" hidden>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
