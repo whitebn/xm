@@ -1,9 +1,9 @@
 // Lets the app work with no internet after the first visit.
 // Bump CACHE when you change app files and want everyone to get the new version at once.
-const CACHE = 'coloring-book-v1';
+const CACHE = 'coloring-book-v2';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/fill.js', 'js/sources.js', 'js/store.js',
+  'js/app.js', 'js/fill.js', 'js/sources.js', 'js/store.js', 'js/brushes.js', 'js/colorwheel.js',
   'lib/pdf.min.mjs', 'lib/pdf.worker.min.mjs',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
 ];

@@ -1,6 +1,9 @@
 import * as store from './store.js';
 import { PdfSource, SampleSource } from './sources.js';
-import { analyzeLineArt, nearestOpen, floodRegion, buildFillBitmap } from './fill.js';
+import { analyzeLineArt, buildFillBitmap, WallSet, smartRegion } from './fill.js';
+import * as Brush from './brushes.js';
+import { TOOLS, TOOL_ORDER } from './brushes.js';
+import { setupColorWheel } from './colorwheel.js';
 
 // ------------------------------------------------------------------ settings
 
@@ -9,12 +12,11 @@ const GAP = 28;                  // px between pages while swiping
 const PAD = 14;                  // px of margin around the paper
 const UNDO_MAX = 30;             // undo steps kept per page
 const UNDO_PIXEL_BUDGET = 16e6;  // roughly 64 MB of undo images per page
-const HIGHLIGHT_ALPHA = 0.62;    // how see-through the paint brush is
 const SNAP_RADIUS = 18;          // CSS px: a tap this close to a line still fills the nearest shape
 const SWIPE_FRACTION = 0.22;     // drag this far (of the width) to turn the page
 const SWIPE_VELOCITY = 0.45;     // or flick faster than this (px per ms)
-const BRUSH_SIZES = [16, 38, 74];   // CSS px
-const ERASER_SIZES = [28, 60, 110]; // CSS px
+const SWIPE_START = 48;          // CSS px a finger must travel sideways before the page starts to move.
+                                 // Smaller wobbles (every toddler tap has some) never move the page.
 const COLORS = [
   ['Red', '#e53935'], ['Orange', '#fb8c00'], ['Yellow', '#fdd835'], ['Light green', '#9ccc3c'],
   ['Green', '#2e9e4f'], ['Sky blue', '#4fc3f7'], ['Blue', '#1e5fd8'], ['Purple', '#8e3bb8'],
@@ -38,6 +40,7 @@ const S = {
   slides: new Map(),
   tool: 'fill',
   colorIndex: 0,
+  customColor: null,      // a color picked on the wheel, or null to use the palette swatch
   size: 1,
   stayInLines: false,
   sound: true,
@@ -51,7 +54,7 @@ const newCanvas = (w, h) => Object.assign(document.createElement('canvas'), { wi
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, 'image/png'));
 const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-const currentColor = () => COLORS[S.colorIndex][1];
+const currentColor = () => S.customColor || COLORS[S.colorIndex][1];
 
 function loadSettings() {
   try {
@@ -130,7 +133,7 @@ function pop() {
 // ------------------------------------------------------------------ pages: load, save, free
 
 function makePage(i) {
-  return { i, w: 0, h: 0, line: null, paint: null, wall: null, loading: null, dirty: false, undo: [] };
+  return { i, w: 0, h: 0, line: null, paint: null, walls: null, loading: null, dirty: false, undo: [] };
 }
 
 function loadPage(i) {
@@ -163,7 +166,7 @@ function loadPage(i) {
       } catch (err) { console.warn('Could not restore colors for page', i + 1, err); }
     }
     if (S.book !== book) return p; // the book was closed while loading
-    Object.assign(p, { w, h, line, paint, wall });
+    Object.assign(p, { w, h, line, paint, walls: new WallSet(wall, w, h) });
     return p;
   })();
   p.loading.catch(() => { p.loading = null; });
@@ -171,7 +174,7 @@ function loadPage(i) {
 }
 
 function freePage(p) {
-  Object.assign(p, { line: null, paint: null, wall: null, loading: null, undo: [], dirty: false });
+  Object.assign(p, { line: null, paint: null, walls: null, loading: null, undo: [], dirty: false });
 }
 
 // Keep memory small: only pages near the current one stay in memory.
@@ -299,8 +302,11 @@ function updateUI() {
   el.undo.disabled = !(p && p.undo.length);
   document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.tool === S.tool)));
   document.querySelectorAll('.size').forEach((b) => b.setAttribute('aria-checked', String(+b.dataset.size === S.size)));
-  document.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-checked', String(+b.dataset.index === S.colorIndex)));
+  document.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-checked', String(!S.customColor && +b.dataset.index === S.colorIndex)));
   el.sizes.classList.toggle('off', S.tool === 'fill');
+  const wheelBtn = $('wheelBtn');
+  wheelBtn.setAttribute('aria-checked', String(!!S.customColor));
+  wheelBtn.style.setProperty('--picked', S.customColor || 'transparent');
   $('mLines').setAttribute('aria-checked', String(S.stayInLines));
   $('mLinesState').textContent = S.stayInLines ? 'On' : 'Off';
   $('mSound').setAttribute('aria-checked', String(S.sound));
@@ -359,14 +365,13 @@ function doFill(clientX, clientY) {
   const k = p.w / r.width;
   const x = (clientX - r.left) * k;
   const y = (clientY - r.top) * k;
-  const spot = nearestOpen(p.wall, p.w, p.h, x, y, Math.round(SNAP_RADIUS * k));
-  if (!spot) {
+  const res = smartRegion(p.walls, x, y, Math.round(SNAP_RADIUS * k));
+  if (!res) {
     slide.paper.classList.remove('nope');
     void slide.paper.offsetWidth; // restart the little shake
     slide.paper.classList.add('nope');
     return;
   }
-  const res = floodRegion(p.wall, p.w, p.h, spot[0], spot[1]);
   const bmp = buildFillBitmap(res, p.w, p.h, hexToRgb(currentColor()));
   pushUndo(p, bmp.x, bmp.y, bmp.w, bmp.h);
   fillTmp.width = bmp.w;
@@ -379,7 +384,7 @@ function doFill(clientX, clientY) {
   updateUI();
 }
 
-// --- strokes (paint brush and eraser)
+// --- strokes (every paint tool and the eraser). The look of each tool lives in brushes.js.
 
 function ensureWet(w, h) {
   if (!S.wet) { S.wet = newCanvas(w, h); S.wet.className = 'wet'; }
@@ -389,9 +394,8 @@ function ensureWet(w, h) {
 }
 
 function makeRegionMask(p, x, y, k) {
-  const spot = nearestOpen(p.wall, p.w, p.h, x, y, Math.round(SNAP_RADIUS * k));
-  if (!spot) return null; // started on a line with no shape nearby: paint freely
-  const res = floodRegion(p.wall, p.w, p.h, spot[0], spot[1]);
+  const res = smartRegion(p.walls, x, y, Math.round(SNAP_RADIUS * k));
+  if (!res) return null; // started on a line with no shape nearby: paint freely
   const bmp = buildFillBitmap(res, p.w, p.h, [0, 0, 0]);
   const c = newCanvas(bmp.w, bmp.h);
   c.getContext('2d').putImageData(new ImageData(bmp.data, bmp.w, bmp.h), 0, 0);
@@ -403,15 +407,20 @@ function beginStroke(e) {
   const slide = S.slides.get(S.cur);
   const rect = slide.paper.getBoundingClientRect();
   const k = p.w / rect.width;
-  const tool = S.tool;
-  const width = (tool === 'eraser' ? ERASER_SIZES : BRUSH_SIZES)[S.size] * k;
-  const st = { p, slide, rect, k, tool, width, last: null, mid: null, box: null, points: 0, mask: null, before: null, ctx: null, t0: performance.now() };
+  const spec = TOOLS[S.tool];
+  const width = spec.sizes[S.size] * k;
+  const st = {
+    p, slide, rect, k, spec, width, half: Brush.reach(spec, width),
+    color: spec.kind === 'erase' ? '#000000' : currentColor(),
+    last: null, mid: null, box: null, points: 0, mask: null, before: null, ctx: null, timer: 0,
+  };
 
-  if (tool === 'brush') {
+  if (spec.kind === 'paint') {
     const wet = ensureWet(p.w, p.h);
+    wet.style.opacity = spec.wet.opacity;
+    wet.style.mixBlendMode = spec.wet.blend;
     slide.paper.insertBefore(wet, p.line);
     st.ctx = wet.getContext('2d');
-    st.ctx.fillStyle = st.ctx.strokeStyle = currentColor();
     if (S.stayInLines) st.mask = makeRegionMask(p, (e.clientX - rect.left) * k, (e.clientY - rect.top) * k, k);
   } else {
     st.before = newCanvas(p.w, p.h);
@@ -419,14 +428,21 @@ function beginStroke(e) {
     st.ctx = p.paint.getContext('2d');
     st.ctx.save();
     st.ctx.globalCompositeOperation = 'destination-out';
-    st.ctx.fillStyle = st.ctx.strokeStyle = '#000';
   }
-  st.ctx.lineWidth = width;
-  st.ctx.lineCap = st.ctx.lineJoin = 'round';
+  Brush.prepare(st);
   G.mode = 'stroke';
   G.stroke = st;
   G.strokePointer = e.pointerId;
   addPoint(e.clientX, e.clientY);
+  // The spray can keeps spraying while the finger rests in one spot.
+  if (Brush.holdsPaint(spec)) st.timer = setInterval(() => holdTick(st), 45);
+}
+
+function holdTick(st) {
+  if (G.stroke !== st || !st.last) return;
+  const [x, y] = st.last;
+  Brush.hold(st, x, y);
+  if (st.mask) applyMask(st, x - st.half, y - st.half, x + st.half, y + st.half);
 }
 
 function growBox(st, x0, y0, x1, y1) {
@@ -438,15 +454,12 @@ function growBox(st, x0, y0, x1, y1) {
 
 function addPoint(clientX, clientY) {
   const st = G.stroke;
-  const ctx = st.ctx;
   const x = (clientX - st.rect.left) * st.k;
   const y = (clientY - st.rect.top) * st.k;
-  const half = st.width / 2 + 2;
+  const half = st.half;
   st.points++;
   if (!st.last) {
-    ctx.beginPath();
-    ctx.arc(x, y, st.width / 2, 0, Math.PI * 2);
-    ctx.fill();
+    Brush.dot(st, x, y);
     st.last = [x, y];
     st.mid = [x, y];
     growBox(st, x - half, y - half, x + half, y + half);
@@ -456,10 +469,7 @@ function addPoint(clientX, clientY) {
   const [lx, ly] = st.last;
   const mx = (lx + x) / 2;
   const my = (ly + y) / 2;
-  ctx.beginPath();
-  ctx.moveTo(st.mid[0], st.mid[1]);
-  ctx.quadraticCurveTo(lx, ly, mx, my);
-  ctx.stroke();
+  Brush.seg(st, st.mid[0], st.mid[1], lx, ly, mx, my);
   const x0 = Math.min(st.mid[0], lx, mx) - half;
   const y0 = Math.min(st.mid[1], ly, my) - half;
   const x1 = Math.max(st.mid[0], lx, mx) + half;
@@ -495,15 +505,17 @@ function endStroke() {
   const st = G.stroke;
   G.stroke = null;
   if (!st) return;
+  clearInterval(st.timer);
   const { p } = st;
   if (!p.paint) return; // page was freed meanwhile
+  Brush.finish(st);
   const r = strokeRect(st);
-  if (st.tool === 'brush') {
+  if (st.spec.kind === 'paint') {
     pushUndo(p, r.x, r.y, r.w, r.h);
     const pc = p.paint.getContext('2d');
     pc.save();
-    pc.globalAlpha = HIGHLIGHT_ALPHA;
-    pc.globalCompositeOperation = 'multiply';
+    pc.globalAlpha = st.spec.commit.alpha;
+    pc.globalCompositeOperation = st.spec.commit.op;
     pc.drawImage(S.wet, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
     pc.restore();
     S.wet.remove();
@@ -519,7 +531,8 @@ function cancelStroke() {
   const st = G.stroke;
   G.stroke = null;
   if (!st) return;
-  if (st.tool === 'brush') {
+  clearInterval(st.timer);
+  if (st.spec.kind === 'paint') {
     S.wet?.remove();
   } else if (st.p.paint) {
     st.ctx.restore();
@@ -532,23 +545,41 @@ function cancelStroke() {
 // ------------------------------------------------------------------ gestures
 //
 // One finger:
-//   Fill tool    tap = fill, drag sideways = turn the page
-//   Paint/Erase  drag = draw (start in the gray margin around the paper to swipe instead)
-// Two fingers anywhere = turn the page.
+//   Fill tool       tap = fill. Drag sideways = turn the page.
+//   Painting tools  drag = draw. Drag starting in the margin around the paper = turn the page.
+// Two fingers moving sideways together, anywhere = turn the page.
+//
+// Nothing ever moves the page until a finger has traveled SWIPE_START pixels sideways,
+// so the wobble of a small hand tapping or scribbling cannot nudge it. A second finger
+// or palm that just rests on the screen is ignored.
 
-const G = { mode: 'none', pointers: new Map(), startX: 0, startY: 0, startT: 0, swipeX0: 0, dx: 0, samples: [], stroke: null, strokePointer: -1 };
+const G = { mode: 'none', pointers: new Map(), primary: -1, startX: 0, startY: 0, swipeX0: 0, swipeTwo: false, dx: 0, samples: [], stroke: null, strokePointer: -1 };
 
-function avgX() {
-  let s = 0;
-  for (const p of G.pointers.values()) s += p.x;
-  return s / G.pointers.size;
+function swipeX() {
+  if (!G.swipeTwo) return G.pointers.get(G.primary)?.x ?? G.startX;
+  let sum = 0;
+  for (const p of G.pointers.values()) sum += p.x;
+  return sum / G.pointers.size;
 }
 
-function beginSwipe(fromX) {
+function beginSwipe(fromX, two = false) {
   G.mode = 'swipe';
-  G.swipeX0 = fromX ?? avgX();
+  G.swipeTwo = two;
+  G.swipeX0 = fromX;
   G.dx = 0;
-  G.samples = [{ x: G.swipeX0, t: performance.now() }];
+  G.samples = [{ x: fromX, t: performance.now() }];
+}
+
+// Two fingers both dragging the same way, clearly sideways.
+function twoFingerSwipeDirection() {
+  if (G.pointers.size < 2) return 0;
+  const [a, b] = [...G.pointers.values()];
+  const da = a.x - a.sx;
+  const db = b.x - b.sx;
+  const avg = (da + db) / 2;
+  const dy = (a.y - a.sy + b.y - b.sy) / 2;
+  const together = Math.sign(da) === Math.sign(db) && Math.min(Math.abs(da), Math.abs(db)) > SWIPE_START / 2;
+  return together && Math.abs(avg) > SWIPE_START && Math.abs(avg) > 1.5 * Math.abs(dy) ? Math.sign(avg) : 0;
 }
 
 function onDown(e) {
@@ -557,27 +588,18 @@ function onDown(e) {
   // Best effort palm rejection: ignore very large touch contacts (a resting hand).
   if (e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > 64) return;
   try { el.track.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone: harmless */ }
-  G.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  G.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
+  if (G.pointers.size > 1) return; // extra fingers never change the mode by themselves
 
-  if (G.pointers.size === 1) {
-    G.startX = e.clientX;
-    G.startY = e.clientY;
-    G.startT = performance.now();
-    const p = S.pages[S.cur];
-    const slide = S.slides.get(S.cur);
-    if (performance.now() < S.animUntil) { G.mode = 'ignore'; return; }
-    if (!p?.paint || !slide || !pointOnPaper(slide, e.clientX, e.clientY)) { beginSwipe(e.clientX); return; }
-    if (S.tool === 'fill') { G.mode = 'pending-fill'; return; }
-    beginStroke(e);
-  } else if (G.pointers.size === 2) {
-    // A second finger that lands right away turns the gesture into a page swipe.
-    // A second contact later on (like a resting palm) is ignored.
-    if (G.mode === 'pending-fill') beginSwipe();
-    else if (G.mode === 'stroke' && performance.now() - G.startT < 160 && G.stroke.points < 4) {
-      cancelStroke();
-      beginSwipe();
-    }
-  }
+  G.primary = e.pointerId;
+  G.startX = e.clientX;
+  G.startY = e.clientY;
+  const p = S.pages[S.cur];
+  const slide = S.slides.get(S.cur);
+  if (performance.now() < S.animUntil) { G.mode = 'ignore'; return; }
+  if (!p?.paint || !slide || !pointOnPaper(slide, e.clientX, e.clientY)) { G.mode = 'pending-swipe'; return; }
+  if (S.tool === 'fill') { G.mode = 'pending-fill'; return; }
+  beginStroke(e);
 }
 
 function onMove(e) {
@@ -585,22 +607,34 @@ function onMove(e) {
   if (!ptr) return;
   ptr.x = e.clientX;
   ptr.y = e.clientY;
+
+  if (['stroke', 'pending-fill', 'pending-swipe'].includes(G.mode)) {
+    const dir = twoFingerSwipeDirection();
+    if (dir) {
+      if (G.mode === 'stroke') cancelStroke();
+      let sum = 0;
+      for (const q of G.pointers.values()) sum += q.x;
+      beginSwipe(sum / G.pointers.size - dir * 8, true);
+    }
+  }
+
   if (G.mode === 'stroke') {
     if (e.pointerId !== G.strokePointer) return;
     const list = e.getCoalescedEvents?.() || [];
     if (list.length) list.forEach((ev) => addPoint(ev.clientX, ev.clientY));
     else addPoint(e.clientX, e.clientY);
-  } else if (G.mode === 'pending-fill') {
+  } else if (G.mode === 'pending-fill' || G.mode === 'pending-swipe') {
+    if (e.pointerId !== G.primary) return;
     const dx = e.clientX - G.startX;
     const dy = e.clientY - G.startY;
-    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.2) beginSwipe(G.startX);
-    else if (Math.hypot(dx, dy) > 16) G.mode = 'ignore'; // it was a scribble, not a tap
+    if (Math.abs(dx) > SWIPE_START && Math.abs(dx) > Math.abs(dy) * 1.5) beginSwipe(e.clientX - Math.sign(dx) * 8);
+    else if (Math.hypot(dx, dy) > SWIPE_START * 1.5) G.mode = 'ignore'; // a scribble or vertical drag, not a tap
   } else if (G.mode === 'swipe') {
-    let dx = avgX() - G.swipeX0;
+    let dx = swipeX() - G.swipeX0;
     const last = S.pages.length - 1;
     if ((S.cur === 0 && dx > 0) || (S.cur === last && dx < 0)) dx *= 0.3; // rubber band at the ends
     G.dx = dx;
-    G.samples.push({ x: avgX(), t: performance.now() });
+    G.samples.push({ x: swipeX(), t: performance.now() });
     if (G.samples.length > 12) G.samples.shift();
     layout(dx, false);
   }
@@ -624,8 +658,9 @@ function endSwipe() {
 
 function onUp(e) {
   if (!G.pointers.delete(e.pointerId)) return;
-  if (G.mode === 'pending-fill' && G.pointers.size === 0) {
+  if (G.mode === 'pending-fill' && e.pointerId === G.primary) {
     doFill(G.startX, G.startY);
+    G.mode = 'ignore';
   } else if (G.mode === 'stroke' && e.pointerId === G.strokePointer) {
     endStroke();
     G.mode = 'ignore';
@@ -652,6 +687,39 @@ document.addEventListener('gesturestart', (e) => e.preventDefault()); // no pinc
 
 // ------------------------------------------------------------------ toolbar
 
+function buildTools() {
+  TOOL_ORDER.forEach((id) => {
+    const t = TOOLS[id];
+    const b = document.createElement('button');
+    b.className = 'tool';
+    b.type = 'button';
+    b.dataset.tool = id;
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-label', t.label);
+    b.innerHTML = `<svg class="icon"><use href="#${t.icon}"/></svg><span>${t.label}</span>`;
+    b.addEventListener('click', () => { S.tool = id; updateUI(); });
+    $('tools').append(b);
+  });
+}
+
+function bindWheel() {
+  const wheel = setupColorWheel({
+    root: $('wheel'),
+    canvas: $('wheelCanvas'),
+    dot: $('wheelDot'),
+    slider: $('wheelBright'),
+    swatch: $('wheelSwatch'),
+    doneButton: $('wheelDone'),
+    onChange: (hex) => {
+      S.customColor = hex;
+      if (S.tool === 'eraser') S.tool = 'fill';
+      updateUI();
+    },
+    onDone: updateUI,
+  });
+  $('wheelBtn').addEventListener('click', () => wheel.open(currentColor(), !!S.customColor));
+}
+
 function buildPalette() {
   COLORS.forEach(([name, hex], i) => {
     const b = document.createElement('button');
@@ -663,12 +731,12 @@ function buildPalette() {
     b.setAttribute('aria-label', name);
     b.addEventListener('click', () => {
       S.colorIndex = i;
+      S.customColor = null;
       if (S.tool === 'eraser') S.tool = 'fill'; // picking a color means "I want to color now"
       updateUI();
     });
     el.palette.append(b);
   });
-  document.querySelectorAll('.tool').forEach((b) => b.addEventListener('click', () => { S.tool = b.dataset.tool; updateUI(); }));
   document.querySelectorAll('.size').forEach((b) => b.addEventListener('click', () => { S.size = +b.dataset.size; updateUI(); }));
   el.prev.addEventListener('click', () => goTo(S.cur - 1));
   el.next.addEventListener('click', () => goTo(S.cur + 1));
@@ -787,7 +855,19 @@ async function exportPage() {
   toast('Picture saved!');
 }
 
+// Clearing can be undone, so a slip does not lose a whole picture.
+function clearPage() {
+  const p = S.pages[S.cur];
+  if (!p?.paint) return;
+  pushUndo(p, 0, 0, p.w, p.h);
+  p.paint.getContext('2d').clearRect(0, 0, p.w, p.h);
+  markDirty(p);
+  updateUI();
+}
+
 function bindMenu() {
+  $('saveBtn').addEventListener('click', exportPage);
+  makeHold($('clearBtn'), 900, clearPage);
   makeHold($('menuBtn'), 700, () => { updateUI(); el.menu.hidden = false; });
   $('mClose').addEventListener('click', () => { el.menu.hidden = true; });
   el.menu.addEventListener('pointerdown', (e) => { if (e.target === el.menu) el.menu.hidden = true; });
@@ -796,15 +876,7 @@ function bindMenu() {
   $('mSave').addEventListener('click', async () => { el.menu.hidden = true; await exportPage(); });
   $('mClear').addEventListener('click', async () => {
     el.menu.hidden = true;
-    if (!(await confirmDialog('Clear all the color from this page?', 'Clear it'))) return;
-    const p = S.pages[S.cur];
-    if (!p?.paint) return;
-    p.paint.getContext('2d').clearRect(0, 0, p.w, p.h);
-    p.undo = [];
-    p.dirty = false;
-    thumbs.delete(p.i);
-    store.savePaint(S.book.id, p.i, null);
-    updateUI();
+    if (await confirmDialog('Clear all the color from this page?', 'Clear it')) clearPage();
   });
   $('mLines').addEventListener('click', () => { S.stayInLines = !S.stayInLines; saveSettings(); updateUI(); });
   $('mSound').addEventListener('click', () => { S.sound = !S.sound; saveSettings(); updateUI(); });
@@ -988,7 +1060,9 @@ function flushOnLeave() {
 }
 
 loadSettings();
+buildTools();
 buildPalette();
+bindWheel();
 bindMenu();
 bindLibrary();
 updateUI();
