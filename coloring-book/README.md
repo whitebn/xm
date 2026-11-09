@@ -9,22 +9,29 @@ It is a web app (it also installs to a phone or tablet home screen). There is no
 - **Import a PDF.** Every page becomes a picture. Vector PDFs and scanned or photographed pages both work.
 - **Fill.** Tap a color, then tap a shape. The color stops at the lines.
   - A tap that lands on the line itself (easy to do with a small finger) fills the nearest shape.
-  - Tiny gaps in a drawing are sealed, so color does not leak out of an almost closed shape.
-- **Paint.** A big translucent brush like a highlighter. The black lines always stay visible on top of the color. Three sizes.
+  - Gaps in the lines are handled. If a shape is almost closed (a gap up to about 0.1 inch on a letter page) the fill stays inside the shape. Tapping the background does not flood into such a shape either.
+- **Paint tools.** Pick a texture, a color and one of three sizes. The black lines always stay visible on top of the color.
+  - **Paint**: a translucent highlighter.
+  - **Spray**: a speckled spray can. Hold still and it gets denser.
+  - **Roller**: a wide flat ribbon with paint streaks.
+  - **Crayon**: waxy and grainy, the paper shows through.
+  - **Sparkle**: a trail of little stars and dots.
+- **Color wheel.** Tap the rainbow circle to pick any color, and slide from dark to bright.
 - **Erase** and **Undo** (30 steps per page).
+- **Save** (download arrow) saves the page as a PNG, or opens the share sheet where the device has one. **Clear** (trash can) wipes the page and needs a press and hold. Undo brings the page back.
 - **Swipe between pages.** See the gesture table below. Big arrow buttons and a "pick a picture" grid are always available too.
 - **Saves automatically.** Close the app and come back later. The book and every colored page are still there.
 - **Works offline** after the first visit.
-- **Grown-ups menu.** Hidden behind a press-and-hold lock button so a toddler cannot wander off. It has: all books, add a PDF, save the picture as a PNG (or share it), clear the page, sounds on/off, and "paint brush stays inside the lines".
+- **Grown-ups menu.** Hidden behind a press-and-hold lock button so a toddler cannot wander off. It has: all books, add a PDF, save the picture, clear the page, sounds on/off, and "painting tools stay inside the lines".
 
 ### Gestures
 
 | Tool | One finger | Two fingers |
 | --- | --- | --- |
 | Fill | tap = fill, drag sideways = turn the page | turn the page |
-| Paint / Erase | drag = draw, drag starting in the margin around the paper = turn the page | turn the page |
+| Paint tools / Erase | drag = draw, drag starting in the margin around the paper = turn the page | turn the page |
 
-A second finger that lands a moment after painting started (like a resting palm) is ignored, so it will not cancel the stroke.
+Nothing moves the page until a finger has traveled about 48 pixels sideways, so the wobble of a small hand tapping or scribbling never nudges it. A second finger that only rests on the screen (like a palm) is ignored. Two fingers must both move the same way to count as a swipe.
 
 ## Run it
 
@@ -48,8 +55,10 @@ Installing it to the home screen is also the best way to use it with a toddler, 
 ```
 index.html        page structure and icons
 styles.css        look and layout (phone, tablet, landscape)
-js/app.js         screens, swipe gestures, tools, undo, saving
-js/fill.js        pure pixel code: line detection, flood fill, gap sealing
+js/app.js         screens, swipe gestures, strokes, undo, saving
+js/brushes.js     the tool list and how each texture is drawn
+js/colorwheel.js  the color wheel dialog
+js/fill.js        pure pixel code: line detection, flood fill, gap closing
 js/sources.js     where pages come from: PDF (pdf.js) and the built-in sample book
 js/store.js       IndexedDB storage for books and colors
 lib/              pdf.js 4.10.38 (Apache-2.0), bundled so it works offline
@@ -62,18 +71,25 @@ test/             unit tests for the fill code
 
 Each page is two canvases stacked on a white sheet: your **color layer** at the bottom and the **line art** on top. The PDF page is rendered to a canvas, then converted so that black becomes lines and white becomes transparent. Because the lines sit above the color, nothing you paint can cover them. That is what gives the highlighter effect.
 
+## Adding to it
+
+- **A new brush or texture.** Add an entry to `TOOLS` in `js/brushes.js` (name, icon, sizes, how it blends) and an icon symbol in `index.html`. If it needs its own look, handle its `id` in `dot()` and `seg()`. The toolbar, undo, saving and "stay inside the lines" all pick it up with no other changes.
+- **A new source of pages.** Anything with `numPages` and `renderLine(index, longSide)` that returns a canvas of black art on white works. See `js/sources.js`.
+- **A new color.** Edit `COLORS` at the top of `js/app.js`.
+- **Pages shipped inside the app** (for example a starter pack): add a source class like `SampleSource`, or bundle PDFs and open them through `PdfSource`.
+
 ## Tests
 
 ```sh
 npm test
 ```
 
-Unit tests cover the fill logic: staying inside a shape, not leaking through a small gap, snapping from a tap on a line, and speed.
+Unit tests cover the fill logic: staying inside a shape, not leaking through a gap in either direction, snapping from a tap on a line, and speed.
 
 ## Known limits
 
 - No zoom. Very detailed pages (mandalas with hundreds of tiny shapes) are hard to fill with a finger.
-- Fill treats every enclosed area as one shape. A PDF whose lines are very faint or broken by wide gaps will leak. In that case use the Paint brush with "stays inside the lines" switched on, or paint by hand.
+- Fill treats every enclosed area as one shape. Gaps wider than about 0.1 inch (on a letter-size page) are not closed, so a shape with a big opening will still leak. The same gap closing means a very narrow corridor between two shapes is treated as closed too.
 - Colors are saved per device and browser. Clearing the browser's site data erases them.
 - Page images are rendered at about 1800 pixels on the long side. Pages with very different aspect ratios are fitted to the screen.
 - The palm rejection (ignoring a large touch contact) is a best effort that depends on what the device reports.

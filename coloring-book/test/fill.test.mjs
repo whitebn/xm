@@ -77,3 +77,69 @@ test('a big region fills quickly', () => {
   console.log(`      full-page flood fill: ${ms.toFixed(0)} ms`);
   assert.ok(ms < 2000);
 });
+
+// ---- gap-aware fill
+import { WallSet, smartRegion, dilateBox } from '../js/fill.js';
+
+// A big box (about 40% of the page) with a gap cut into its top edge.
+function boxWithGap(gap) {
+  const w = 300, h = 300;
+  const rgba = makeImage(w, h, (s) => rect(s, 60, 60, 240, 240, 4));
+  for (let y = 58; y < 66; y++) for (let x = 150; x < 150 + gap; x++) { const j = (y * w + x) * 4; rgba[j] = rgba[j + 1] = rgba[j + 2] = 255; }
+  const { wall } = analyzeLineArt(rgba, w, h);
+  return { w, h, walls: new WallSet(wall, w, h) };
+}
+
+test('a plain fill leaks through a 10px gap, a smart fill does not', () => {
+  const { w, h, walls } = boxWithGap(10);
+  const plain = floodRegion(walls.base, w, h, 150, 150);
+  assert.equal(plain.region[10 * w + 10], 1, 'plain fill leaks to the outside (this is the problem being fixed)');
+  const smart = smartRegion(walls, 150, 150, 10);
+  assert.ok(smart.sealed > 0, 'a gap was sealed');
+  assert.equal(smart.region[10 * w + 10], 0, 'outside is not filled');
+  assert.equal(smart.region[150 * w + 150], 1, 'inside is filled');
+  assert.equal(smart.region[100 * w + 70], 1, 'the shape is filled right up to its sides');
+});
+
+test('smart fill leaves a normal closed box and a normal background alone', () => {
+  const { w, h, walls } = boxWithGap(0);
+  const inside = smartRegion(walls, 150, 150, 10);
+  assert.equal(inside.sealed, 0);
+  const outside = smartRegion(walls, 10, 10, 10);
+  assert.equal(outside.sealed, 0, 'a legitimate large background is not split');
+  assert.equal(outside.region[150 * w + 150], 0);
+});
+
+test('a gap too big to close still fills (no crash, falls back)', () => {
+  const { walls } = boxWithGap(40);
+  const r = smartRegion(walls, 150, 150, 10);
+  assert.ok(r && r.count > 0);
+});
+
+test('dilateBox matches repeated dilateSquare', () => {
+  const w = 40, h = 30;
+  const m = new Uint8Array(w * h);
+  m[15 * w + 20] = 1; m[3 * w + 3] = 1;
+  let a = m;
+  for (let i = 0; i < 4; i++) a = dilateSquare(a, w, h);
+  const b = dilateBox(m, w, h, 4);
+  assert.deepEqual(Array.from(a), Array.from(b));
+});
+
+test('dilateBox on a full page is fast', () => {
+  const w = 1800, h = 1400;
+  const m = new Uint8Array(w * h); m[700 * w + 900] = 1;
+  const t = performance.now();
+  dilateBox(m, w, h, 8);
+  const ms = performance.now() - t;
+  console.log(`      dilateBox full page: ${ms.toFixed(0)} ms`);
+  assert.ok(ms < 1500);
+});
+
+test('tapping outside a shape with a gap does not flood into the shape', () => {
+  const { w, h, walls } = boxWithGap(10);
+  const outside = smartRegion(walls, 10, 10, 10);
+  assert.ok(outside.sealed > 0, 'the gap was closed');
+  assert.equal(outside.region[10 * w + 10], 1, 'the outside is filled');
+  assert.equal(outside.region[150 * w + 150], 0, 'the inside of the shape is left alone');
+});

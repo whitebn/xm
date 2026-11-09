@@ -153,3 +153,134 @@ export function buildFillBitmap(res, w, h, rgb, grow = GROW) {
   }
   return { x: x0, y: y0, w: bw, h: bh, data };
 }
+
+// ---------------------------------------------------------------- gap-aware fill
+//
+// Line art often has small gaps where a shape is "almost" closed. A plain flood
+// fill leaks through the gap and floods the whole page. To avoid that, when a
+// fill comes out huge we retry with thicker walls (which close the gaps), and
+// keep that result if it is much smaller. The color is then grown back toward
+// the real lines so it still reaches them.
+
+/** A fill that covers more than this share of the page is checked for leaks. */
+export const LEAK_FRACTION = 0.04;
+/** Extra pixels to thicken walls by when closing gaps (a gap up to ~2x this plus the base seal is closed). */
+export const SEAL_STEPS = [3, 5, 8];
+/** Closing the widest gaps must cut off at least this share of the page to count as a separate shape. */
+export const SPLIT_FRACTION = 0.015;
+
+/** Grow a 0/1 mask by k pixels (square window). Takes O(pixels) no matter how big k is. */
+export function dilateBox(src, w, h, k) {
+  if (k <= 0) return Uint8Array.from(src);
+  const tmp = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let cnt = 0;
+    for (let x = 0; x <= Math.min(k, w - 1); x++) cnt += src[row + x];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = cnt > 0 ? 1 : 0;
+      const add = x + k + 1;
+      const rem = x - k;
+      if (add < w) cnt += src[row + add];
+      if (rem >= 0) cnt -= src[row + rem];
+    }
+  }
+  const out = new Uint8Array(w * h);
+  const col = new Int32Array(w);
+  for (let y = 0; y <= Math.min(k, h - 1); y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) col[x] += tmp[row + x];
+  }
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) out[row + x] = col[x] > 0 ? 1 : 0;
+    const add = y + k + 1;
+    const rem = y - k;
+    if (add < h) { const r = add * w; for (let x = 0; x < w; x++) col[x] += tmp[r + x]; }
+    if (rem >= 0) { const r = rem * w; for (let x = 0; x < w; x++) col[x] -= tmp[r + x]; }
+  }
+  return out;
+}
+
+/** The page's walls at several thicknesses. Thicker versions are made on demand and remembered. */
+export class WallSet {
+  constructor(base, w, h) {
+    this.base = base;
+    this.w = w;
+    this.h = h;
+    this.cache = new Map();
+  }
+
+  get(extra) {
+    if (!extra) return this.base;
+    let m = this.cache.get(extra);
+    if (!m) {
+      m = dilateBox(this.base, this.w, this.h, extra);
+      this.cache.set(extra, m);
+    }
+    return m;
+  }
+}
+
+/** Grow a flood result by `steps` pixels, but only through pixels that are open in `wall`. */
+export function regrow(res, wall, w, h, steps) {
+  const { region } = res;
+  for (let s = 0; s < steps; s++) {
+    const x0 = Math.max(0, res.minX - 1);
+    const x1 = Math.min(w - 1, res.maxX + 1);
+    const y0 = Math.max(0, res.minY - 1);
+    const y1 = Math.min(h - 1, res.maxY + 1);
+    const add = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const i = y * w + x;
+        if (region[i] || wall[i]) continue;
+        if ((x > 0 && region[i - 1]) || (x < w - 1 && region[i + 1]) || (y > 0 && region[i - w]) || (y < h - 1 && region[i + w])) add.push(i);
+      }
+    }
+    if (!add.length) break;
+    for (const i of add) {
+      region[i] = 1;
+      const x = i % w;
+      const y = (i / w) | 0;
+      if (x < res.minX) res.minX = x;
+      if (x > res.maxX) res.maxX = x;
+      if (y < res.minY) res.minY = y;
+      if (y > res.maxY) res.maxY = y;
+    }
+    res.count += add.length;
+  }
+  return res;
+}
+
+/**
+ * Find the region to fill for a tap at (x, y), closing small gaps in the lines.
+ * Returns { region, minX, minY, maxX, maxY, count, sealed } or null.
+ * `sealed` is 0 for a normal fill, or the gap-closing radius that was needed.
+ */
+export function smartRegion(walls, x, y, snap) {
+  const { w, h, base } = walls;
+  const spot = nearestOpen(base, w, h, x, y, snap);
+  if (!spot) return null;
+  const first = floodRegion(base, w, h, spot[0], spot[1]);
+  if (!first) return null;
+  first.sealed = 0;
+  if (first.count <= LEAK_FRACTION * w * h) return first;
+  let widest = null;
+  for (const r of SEAL_STEPS) {
+    const thick = walls.get(r);
+    const seed = nearestOpen(thick, w, h, spot[0], spot[1], r + 2);
+    if (!seed) continue;
+    const res = floodRegion(thick, w, h, seed[0], seed[1]);
+    if (!res) continue;
+    regrow(res, base, w, h, r);
+    res.sealed = r;
+    // Rule 1: the tap was inside a shape with a gap, and the fill was leaking out of it.
+    if (res.count < first.count * 0.5) return res;
+    widest = res;
+  }
+  // Rule 2: the tap was outside, and the fill was leaking *into* a shape with a gap.
+  // If closing the gaps cuts off a meaningful piece, leave that piece alone.
+  if (widest && first.count - widest.count >= SPLIT_FRACTION * w * h) return widest;
+  return first;
+}

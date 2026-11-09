@@ -34,6 +34,10 @@
     <symbol id="i-sound" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L13 19V5L7.5 9.5H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5L13 19V5L7.5 9.5H4z"/><path d="m16.5 9.5 5 5M21.5 9.5l-5 5"/></symbol>
     <symbol id="i-lines" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" stroke-dasharray="3 2.5"/><path d="M8 14c2-4 4-4 8-5"/></symbol>
+    <symbol id="i-spray" viewBox="0 0 24 24"><path d="M10 9.5h7.5V20a1 1 0 0 1-1 1H11a1 1 0 0 1-1-1z"/><path d="M11 9.5V7h5.5v2.5M12.5 7V4.5h2.5V7"/><path d="M5 5.5h.01M3.5 8.5h.01M6 11.5h.01M4.5 14h.01M7.5 8h.01" stroke-width="2.6"/></symbol>
+    <symbol id="i-roller" viewBox="0 0 24 24"><rect x="3.5" y="4" width="14" height="5.5" rx="1.6"/><path d="M17.5 6.75H20V12h-8v2.5"/><rect x="10.3" y="14.5" width="3.4" height="6" rx="1.2"/></symbol>
+    <symbol id="i-crayon" viewBox="0 0 24 24"><path d="m6.5 17 9.7-9.7 3 3L9.5 20z"/><path d="m6.5 17-1.5 3.4 4.5-.4M14 9.5l3 3M16.2 7.3l1.4-1.4a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2l-1.4 1.4"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M10.5 3c.6 4.6 2.8 6.8 7.4 7.4-4.6.6-6.8 2.8-7.4 7.4-.6-4.6-2.8-6.8-7.4-7.4C7.7 9.8 9.9 7.6 10.5 3z"/><path d="M18.5 15.5v5M16 18h5"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </defs>
 </svg>
@@ -64,32 +68,38 @@
 <!-- ================= Coloring screen ================= -->
 <div id="book" class="screen" hidden>
   <header class="topbar">
-    <button id="menuBtn" class="round hold" type="button" aria-label="Grown-ups menu. Press and hold to open.">
-      <svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/></svg>
-      <svg class="icon"><use href="#i-lock"/></svg>
-    </button>
+    <div class="cluster">
+      <button id="menuBtn" class="round sm hold" type="button" aria-label="Grown-ups menu. Press and hold to open.">
+        <svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/></svg>
+        <svg class="icon"><use href="#i-lock"/></svg>
+      </button>
+      <button id="saveBtn" class="round sm" type="button" aria-label="Save this picture"><svg class="icon"><use href="#i-download"/></svg></button>
+      <button id="clearBtn" class="round sm hold" type="button" aria-label="Clear this page. Press and hold.">
+        <svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="21"/></svg>
+        <svg class="icon"><use href="#i-trash"/></svg>
+      </button>
+    </div>
     <div class="pager">
       <button id="prevBtn" class="round" type="button" aria-label="Previous page"><svg class="icon"><use href="#i-prev"/></svg></button>
       <button id="counter" class="counter" type="button" aria-label="See all pages"><svg class="icon small"><use href="#i-grid"/></svg><span id="counterText">1 / 1</span></button>
       <button id="nextBtn" class="round" type="button" aria-label="Next page"><svg class="icon"><use href="#i-next"/></svg></button>
     </div>
-    <button id="undoBtn" class="round" type="button" aria-label="Undo" disabled><svg class="icon"><use href="#i-undo"/></svg></button>
+    <div class="cluster end">
+      <button id="undoBtn" class="round" type="button" aria-label="Undo" disabled><svg class="icon"><use href="#i-undo"/></svg></button>
+    </div>
   </header>
 
   <div id="stage"><div id="track"></div></div>
 
   <footer class="toolbar">
+    <div class="tools" id="tools" role="radiogroup" aria-label="Tools"></div>
     <div class="toolrow">
-      <div class="tools" role="radiogroup" aria-label="Tools">
-        <button class="tool" data-tool="fill" role="radio" type="button"><svg class="icon"><use href="#i-fill"/></svg><span>Fill</span></button>
-        <button class="tool" data-tool="brush" role="radio" type="button"><svg class="icon"><use href="#i-brush"/></svg><span>Paint</span></button>
-        <button class="tool" data-tool="eraser" role="radio" type="button"><svg class="icon"><use href="#i-eraser"/></svg><span>Erase</span></button>
-      </div>
       <div class="sizes" id="sizes" role="radiogroup" aria-label="Brush size">
-        <button class="size" data-size="0" role="radio" type="button" aria-label="Small brush"><i></i></button>
-        <button class="size" data-size="1" role="radio" type="button" aria-label="Medium brush"><i></i></button>
-        <button class="size" data-size="2" role="radio" type="button" aria-label="Big brush"><i></i></button>
+        <button class="size" data-size="0" role="radio" type="button" aria-label="Small"><i></i></button>
+        <button class="size" data-size="1" role="radio" type="button" aria-label="Medium"><i></i></button>
+        <button class="size" data-size="2" role="radio" type="button" aria-label="Big"><i></i></button>
       </div>
+      <button id="wheelBtn" class="wheel-btn" type="button" role="radio" aria-label="Color wheel: pick any color"><i></i></button>
     </div>
     <div class="palette" id="palette" role="radiogroup" aria-label="Colors"></div>
   </footer>
@@ -104,7 +114,7 @@
       <button id="mAdd" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add a PDF</button>
       <button id="mSave" type="button"><svg class="icon"><use href="#i-download"/></svg>Save this picture</button>
       <button id="mClear" type="button"><svg class="icon"><use href="#i-trash"/></svg>Clear this page</button>
-      <button id="mLines" type="button" role="switch"><svg class="icon"><use href="#i-lines"/></svg><span>Paint brush stays inside the lines</span><b class="pill" id="mLinesState">Off</b></button>
+      <button id="mLines" type="button" role="switch"><svg class="icon"><use href="#i-lines"/></svg><span>Painting tools stay inside the lines</span><b class="pill" id="mLinesState">Off</b></button>
       <button id="mSound" type="button" role="switch"><svg class="icon"><use href="#i-sound"/></svg><span>Sounds</span><b class="pill" id="mSoundState">On</b></button>
     </div>
     <button id="mClose" class="primary" type="button">Done</button>
@@ -115,6 +125,15 @@
   <div class="sheet wide" role="dialog" aria-label="All pages">
     <div class="sheet-head"><h2>Pick a picture</h2><button id="pagesClose" class="round small" type="button" aria-label="Close"><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div id="pageGrid" class="page-grid"></div>
+  </div>
+</div>
+
+<div id="wheel" class="overlay" hidden>
+  <div class="sheet wheel-sheet" role="dialog" aria-label="Color wheel">
+    <h2>Pick any color</h2>
+    <div class="wheel-wrap"><canvas id="wheelCanvas"></canvas><i id="wheelDot"></i></div>
+    <div class="bright"><span>Dark</span><input id="wheelBright" type="range" min="10" max="100" value="100" aria-label="Dark to bright"><span>Bright</span></div>
+    <div class="wheel-row"><span id="wheelSwatch" class="wheel-swatch"></span><button id="wheelDone" class="primary" type="button">Use this color</button></div>
   </div>
 </div>
 
