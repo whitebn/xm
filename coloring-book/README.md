@@ -81,7 +81,3 @@ Unit tests cover the fill logic: staying inside a shape, not leaking through a s
 ## Credits
 
 PDF rendering by [pdf.js](https://github.com/mozilla/pdf.js) from Mozilla, included under the Apache License 2.0 (see `lib/PDFJS-LICENSE.txt`).
-
-## Publish with GitHub Pages
-
-The workflow in `.github/workflows/coloring-book-pages.yml` publishes this folder whenever changes to it land on the repo's default branch. One-time setup: in the repo go to **Settings, Pages, Build and deployment** and set **Source** to **GitHub Actions**. The address will be `https://<your-user>.github.io/<repo-name>/`. You can also run it by hand from the **Actions** tab.
