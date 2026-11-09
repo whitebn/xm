@@ -192,3 +192,7 @@ The application will be available at:
 ## License
 
 MIT
+
+## Also in this repo
+
+[`coloring-book/`](coloring-book/README.md) is a separate, standalone coloring book app for toddlers (import a PDF, tap to fill, swipe between pages). It does not share code with the project management system above.

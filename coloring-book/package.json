@@ -1,0 +1,11 @@
+{
+  "name": "toddler-coloring-book",
+  "version": "1.0.0",
+  "description": "A coloring book app for toddlers. Import a black and white PDF, tap to fill, paint with a highlighter brush, swipe between pages.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/fill.test.mjs"
+  }
+}
