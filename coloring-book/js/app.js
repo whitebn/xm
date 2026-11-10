@@ -7,7 +7,7 @@ import { setupColorWheel } from './colorwheel.js';
 
 // If the page and this script ever come from different versions (an interrupted update), clear the
 // saved copies and reload once so the app repairs itself. Books and colors are not touched.
-const APP_VERSION = '4';
+const APP_VERSION = '5';
 (function selfHeal() {
   const pageVersion = document.querySelector('meta[name="cb-version"]')?.content;
   if (pageVersion === APP_VERSION) return;
@@ -24,7 +24,7 @@ const LONG_SIDE = 1800;          // pixels on the long edge of each page's canva
 const GAP = 28;                  // px between pages while swiping
 const PAD = 14;                  // px of margin around the paper
 const UNDO_MAX = 30;             // undo steps kept per page
-const UNDO_PIXEL_BUDGET = 16e6;  // roughly 64 MB of undo images per page
+const UNDO_PIXEL_BUDGET = 12e6;  // roughly 48 MB of undo images per page (iPad Safari limits canvas memory)
 const SNAP_RADIUS = 18;          // CSS px: a tap this close to a line still fills the nearest shape
 const SWIPE_FRACTION = 0.22;     // drag this far (of the width) to turn the page
 const SWIPE_VELOCITY = 0.45;     // or flick faster than this (px per ms)
@@ -149,6 +149,27 @@ function pop() {
 
 // ------------------------------------------------------------------ pages: load, save, free
 
+// Turn saved PNG bytes into something drawImage accepts. createImageBitmap needs iPadOS 15, so fall back to an <img>.
+async function decodePng(buf) {
+  const blob = new Blob([buf], { type: 'image/png' });
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(blob); } catch { /* fall through to <img> */ }
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Safari on iPad kills a page that holds too many big canvases, and does not free a canvas
+// just because nothing points at it any more. Setting its size to 0 releases the memory right away.
+const release = (canvas) => { if (canvas) canvas.width = canvas.height = 0; };
+
 function makePage(i) {
   return { i, w: 0, h: 0, line: null, paint: null, walls: null, loading: null, dirty: false, undo: [] };
 }
@@ -171,13 +192,14 @@ function loadPage(i) {
     }
     const line = newCanvas(w, h);
     line.getContext('2d').putImageData(img, 0, 0);
+    release(raw);
 
     const paint = newCanvas(w, h);
     await S.pending.get(i);
     const saved = await store.getPaint(book.id, i);
     if (saved) {
       try {
-        const bmp = await createImageBitmap(new Blob([saved], { type: 'image/png' }));
+        const bmp = await decodePng(saved);
         paint.getContext('2d').drawImage(bmp, 0, 0, w, h);
         bmp.close?.();
       } catch (err) { console.warn('Could not restore colors for page', i + 1, err); }
@@ -191,13 +213,16 @@ function loadPage(i) {
 }
 
 function freePage(p) {
+  release(p.line);
+  release(p.paint);
+  p.undo.forEach((u) => release(u.c));
   Object.assign(p, { line: null, paint: null, walls: null, loading: null, undo: [], dirty: false });
 }
 
 // Keep memory small: only pages near the current one stay in memory.
 function evict() {
   for (const p of S.pages) {
-    if (p.line && Math.abs(p.i - S.cur) > 2 && !S.slides.has(p.i)) {
+    if (p.line && Math.abs(p.i - S.cur) > 1 && !S.slides.has(p.i)) {
       if (p.dirty) savePage(p);
       freePage(p);
     }
@@ -342,6 +367,7 @@ function pushUndo(p, x, y, w, h, source = p.paint) {
   while (p.undo.length > UNDO_MAX || (total > UNDO_PIXEL_BUDGET && p.undo.length > 1)) {
     const old = p.undo.shift();
     total -= old.w * old.h;
+    release(old.c);
   }
 }
 
@@ -352,6 +378,7 @@ function undo() {
   const ctx = p.paint.getContext('2d');
   ctx.clearRect(u.x, u.y, u.w, u.h);
   ctx.drawImage(u.c, u.x, u.y);
+  release(u.c);
   markDirty(p);
   updateUI();
 }
@@ -397,6 +424,7 @@ function doFill(clientX, clientY) {
   fillTmp.height = bmp.h;
   fillTmp.getContext('2d').putImageData(new ImageData(bmp.data, bmp.w, bmp.h), 0, 0);
   p.paint.getContext('2d').drawImage(fillTmp, bmp.x, bmp.y);
+  release(fillTmp);
   ripple(slide, clientX, clientY);
   pop();
   markDirty(p);
@@ -538,10 +566,13 @@ function endStroke() {
     pc.drawImage(S.wet, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
     pc.restore();
     S.wet.remove();
+    release(S.wet);
   } else {
     st.ctx.restore();
     pushUndo(p, r.x, r.y, r.w, r.h, st.before);
+    release(st.before);
   }
+  release(st.mask?.canvas);
   markDirty(p);
   updateUI();
 }
@@ -553,12 +584,15 @@ function cancelStroke() {
   clearInterval(st.timer);
   if (st.spec.kind === 'paint') {
     S.wet?.remove();
+    release(S.wet);
   } else if (st.p.paint) {
     st.ctx.restore();
     const ctx = st.p.paint.getContext('2d');
     ctx.clearRect(0, 0, st.p.w, st.p.h);
     ctx.drawImage(st.before, 0, 0);
+    release(st.before);
   }
+  release(st.mask?.canvas);
 }
 
 // ------------------------------------------------------------------ gestures
@@ -791,7 +825,7 @@ async function makeThumb(i, book = S.book, source = S.source) {
     const saved = await store.getPaint(book.id, i);
     if (saved) {
       try {
-        const bmp = await createImageBitmap(new Blob([saved], { type: 'image/png' }));
+        const bmp = await decodePng(saved);
         ctx.drawImage(bmp, 0, 0, out.width, out.height);
         bmp.close?.();
       } catch { /* show the plain page */ }
@@ -973,7 +1007,7 @@ async function openBook(book, source) {
 }
 
 function teardownBook() {
-  S.pages.forEach((p) => { p.loading = null; });
+  S.pages.forEach((p) => { p.loading = null; freePage(p); });
   S.book = null;
   S.source = null;
   S.pages = [];
@@ -1072,6 +1106,9 @@ function bindLibrary() {
 // ------------------------------------------------------------------ full screen and zoom
 
 const rootEl = document.documentElement;
+// Safari on iPad does offer full screen, but with an exit button that cannot be hidden and a swipe-down that exits,
+// which is wrong for a toddler. On iOS the right answer is Add to Home Screen, so full screen is not offered there.
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
 const canFullscreen = () => !!(rootEl.requestFullscreen || rootEl.webkitRequestFullscreen);
@@ -1088,9 +1125,13 @@ async function toggleFullscreen() {
 // Browsers only allow full screen after a tap, so go full screen on the first one.
 // An installed app (Add to Home screen) is already full screen, so it is left alone.
 function setupFullscreen() {
-  $('mFull').hidden = !canFullscreen() || isStandalone();
+  const ios = isIOS();
+  $('mFull').hidden = ios || !canFullscreen() || isStandalone();
   $('mInstallTip').hidden = isStandalone();
-  if (!S.autoFullscreen || isStandalone() || !canFullscreen()) return;
+  $('mInstallTip').innerHTML = ios
+    ? 'For full screen, install it: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. Open it from the new icon. It also keeps your colors safe.'
+    : 'For a true full-screen app, install it: open the Chrome menu and tap <b>Install app</b> or <b>Add to Home screen</b>. Then open it from the new icon.';
+  if (!S.autoFullscreen || ios || isStandalone() || !canFullscreen()) return;
   const first = () => {
     document.removeEventListener('pointerup', first, true);
     if (!fullscreenElement()) (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl).catch(() => {});

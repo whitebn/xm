@@ -5,7 +5,7 @@
 // copy saved from the last visit is used.
 //
 // Bump CACHE whenever you change app files so old copies are cleaned up.
-const CACHE = 'coloring-book-v4';
+const CACHE = 'coloring-book-v5';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/fill.js', 'js/sources.js', 'js/store.js', 'js/brushes.js', 'js/colorwheel.js',
