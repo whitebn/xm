@@ -345,6 +345,11 @@ h1 span:nth-child(5n)   { color: #a855f7; }
   box-shadow: 0 0 0 4px var(--ring), 0 6px 10px rgba(0, 0, 0, .3);
 }
 
+/* below tablet-landscape width, 12 swatches wrap as two even rows of six instead of 11 + 1 */
+@media (max-width: 899px) {
+  .palette { max-width: calc(6 * (var(--sw) + 10px)); margin: 0 auto; }
+}
+
 /* narrow portrait phones: everything must fit across 360px */
 @media (max-width: 480px) {
   .topbar { padding: 6px 8px; gap: 4px; }

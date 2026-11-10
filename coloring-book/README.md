@@ -101,3 +101,7 @@ PDF rendering by [pdf.js](https://github.com/mozilla/pdf.js) from Mozilla, inclu
 ## Publish with GitHub Pages
 
 The workflow in `.github/workflows/coloring-book-pages.yml` publishes this folder whenever changes to it land on the repo's default branch. One-time setup: in the repo go to **Settings, Pages, Build and deployment** and set **Source** to **GitHub Actions**. The address will be `https://<your-user>.github.io/<repo-name>/`. You can also run it by hand from the **Actions** tab.
+
+### Updating an installed copy
+
+When you deploy a new version, an installed copy picks it up the next time the app is opened. Because the old copy is shown first while the new one downloads in the background, **close the app fully and open it again once or twice** to see the change. Saved books and colors are kept. If you change app files, bump `CACHE` in `sw.js` and `APP_VERSION` in `js/app.js` and the `cb-version` meta tag in `index.html` together. If the page and script ever come from different versions, the app clears its saved copies and reloads once by itself.

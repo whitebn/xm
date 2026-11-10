@@ -5,6 +5,19 @@ import * as Brush from './brushes.js';
 import { TOOLS, TOOL_ORDER } from './brushes.js';
 import { setupColorWheel } from './colorwheel.js';
 
+// If the page and this script ever come from different versions (an interrupted update), clear the
+// saved copies and reload once so the app repairs itself. Books and colors are not touched.
+const APP_VERSION = '3';
+(function selfHeal() {
+  const pageVersion = document.querySelector('meta[name="cb-version"]')?.content;
+  if (pageVersion === APP_VERSION) return;
+  try { if (sessionStorage.getItem('cb.healed')) return; sessionStorage.setItem('cb.healed', '1'); } catch { return; }
+  Promise.all([
+    navigator.serviceWorker?.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.unregister()))),
+    window.caches?.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))),
+  ]).catch(() => {}).finally(() => location.reload());
+})();
+
 // ------------------------------------------------------------------ settings
 
 const LONG_SIDE = 1800;          // pixels on the long edge of each page's canvases
