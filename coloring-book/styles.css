@@ -17,6 +17,7 @@
 [hidden] { display: none !important; }
 
 html, body {
+  touch-action: pan-x pan-y; /* no pinch zoom, ever: a zoomed page pushes the buttons off screen */
   margin: 0;
   height: 100%;
   position: fixed;
@@ -62,7 +63,7 @@ button:disabled { opacity: .35; cursor: default; }
 .screen { position: fixed; inset: 0; }
 
 /* ---------------------------------------------------------------- library */
-#library { overflow-y: auto; padding: max(24px, env(safe-area-inset-top)) 20px 40px; }
+#library { touch-action: pan-y; overflow-y: auto; padding: max(24px, env(safe-area-inset-top)) 20px 40px; }
 .library-inner { max-width: 960px; margin: 0 auto; text-align: center; }
 h1 {
   margin: 12px 0 0;
@@ -125,6 +126,7 @@ h1 span:nth-child(5n)   { color: #a855f7; }
 
 /* ---------------------------------------------------------------- coloring screen */
 #book {
+  touch-action: none;
   display: flex;
   flex-direction: column;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -345,6 +347,11 @@ h1 span:nth-child(5n)   { color: #a855f7; }
   box-shadow: 0 0 0 4px var(--ring), 0 6px 10px rgba(0, 0, 0, .3);
 }
 
+/* below tablet-landscape width, 12 swatches wrap as two even rows of six instead of 11 + 1 */
+@media (max-width: 899px) {
+  .palette { max-width: calc(6 * (var(--sw) + 10px)); margin: 0 auto; }
+}
+
 /* narrow portrait phones: everything must fit across 360px */
 @media (max-width: 480px) {
   .topbar { padding: 6px 8px; gap: 4px; }
@@ -535,6 +542,9 @@ h1 span:nth-child(5n)   { color: #a855f7; }
   font-weight: 800;
   pointer-events: none;
 }
+
+.tip-small { margin: 0 0 12px; font-size: .88rem; line-height: 1.4; opacity: .75; }
+.sheet { touch-action: pan-y; }
 
 /* color wheel */
 .wheel-sheet { width: min(340px, 100%); text-align: center; }

@@ -6,7 +6,9 @@
   <title>Coloring Book</title>
   <meta name="description" content="A coloring book for little hands. Import a PDF, tap to fill, paint with a highlighter brush, and swipe between pages.">
   <meta name="theme-color" content="#ffd84d">
+  <meta name="cb-version" content="4">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Coloring">
   <link rel="manifest" href="manifest.webmanifest">
@@ -38,6 +40,7 @@
     <symbol id="i-roller" viewBox="0 0 24 24"><rect x="3.5" y="4" width="14" height="5.5" rx="1.6"/><path d="M17.5 6.75H20V12h-8v2.5"/><rect x="10.3" y="14.5" width="3.4" height="6" rx="1.2"/></symbol>
     <symbol id="i-crayon" viewBox="0 0 24 24"><path d="m6.5 17 9.7-9.7 3 3L9.5 20z"/><path d="m6.5 17-1.5 3.4 4.5-.4M14 9.5l3 3M16.2 7.3l1.4-1.4a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2l-1.4 1.4"/></symbol>
     <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M10.5 3c.6 4.6 2.8 6.8 7.4 7.4-4.6.6-6.8 2.8-7.4 7.4-.6-4.6-2.8-6.8-7.4-7.4C7.7 9.8 9.9 7.6 10.5 3z"/><path d="M18.5 15.5v5M16 18h5"/></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </defs>
 </svg>
@@ -114,9 +117,12 @@
       <button id="mAdd" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add a PDF</button>
       <button id="mSave" type="button"><svg class="icon"><use href="#i-download"/></svg>Save this picture</button>
       <button id="mClear" type="button"><svg class="icon"><use href="#i-trash"/></svg>Clear this page</button>
+      <button id="mFull" type="button" hidden><svg class="icon"><use href="#i-full"/></svg>Full screen</button>
+      <button id="mGaps" type="button" role="switch"><svg class="icon"><use href="#i-fill"/></svg><span>Fill stops at small gaps in the lines</span><b class="pill" id="mGapsState">On</b></button>
       <button id="mLines" type="button" role="switch"><svg class="icon"><use href="#i-lines"/></svg><span>Painting tools stay inside the lines</span><b class="pill" id="mLinesState">Off</b></button>
       <button id="mSound" type="button" role="switch"><svg class="icon"><use href="#i-sound"/></svg><span>Sounds</span><b class="pill" id="mSoundState">On</b></button>
     </div>
+    <p id="mInstallTip" class="tip-small" hidden>For a true full-screen app, install it: in Chrome open the menu and tap <b>Install app</b> or <b>Add to Home screen</b>. In Safari tap Share, then <b>Add to Home Screen</b>. Then open it from the new icon.</p>
     <button id="mClose" class="primary" type="button">Done</button>
   </div>
 </div>

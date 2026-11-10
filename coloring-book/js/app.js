@@ -5,6 +5,19 @@ import * as Brush from './brushes.js';
 import { TOOLS, TOOL_ORDER } from './brushes.js';
 import { setupColorWheel } from './colorwheel.js';
 
+// If the page and this script ever come from different versions (an interrupted update), clear the
+// saved copies and reload once so the app repairs itself. Books and colors are not touched.
+const APP_VERSION = '4';
+(function selfHeal() {
+  const pageVersion = document.querySelector('meta[name="cb-version"]')?.content;
+  if (pageVersion === APP_VERSION) return;
+  try { if (sessionStorage.getItem('cb.healed')) return; sessionStorage.setItem('cb.healed', '1'); } catch { return; }
+  Promise.all([
+    navigator.serviceWorker?.getRegistrations().then((rs) => Promise.all(rs.map((r) => r.unregister()))),
+    window.caches?.keys().then((ks) => Promise.all(ks.map((k) => caches.delete(k)))),
+  ]).catch(() => {}).finally(() => location.reload());
+})();
+
 // ------------------------------------------------------------------ settings
 
 const LONG_SIDE = 1800;          // pixels on the long edge of each page's canvases
@@ -43,7 +56,9 @@ const S = {
   customColor: null,      // a color picked on the wheel, or null to use the palette swatch
   size: 1,
   stayInLines: false,
+  closeGaps: true,       // stop a fill from leaking out of a shape that has a small gap
   sound: true,
+  autoFullscreen: true,  // go full screen on the first tap, where the browser allows it
   wet: null,             // the see-through canvas used while painting a stroke
   animUntil: 0,
   saveTimer: 0,
@@ -60,11 +75,13 @@ function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem('cb.settings') || '{}');
     if (typeof s.stayInLines === 'boolean') S.stayInLines = s.stayInLines;
+    if (typeof s.closeGaps === 'boolean') S.closeGaps = s.closeGaps;
+    if (typeof s.autoFullscreen === 'boolean') S.autoFullscreen = s.autoFullscreen;
     if (typeof s.sound === 'boolean') S.sound = s.sound;
   } catch { /* storage blocked: use defaults */ }
 }
 function saveSettings() {
-  try { localStorage.setItem('cb.settings', JSON.stringify({ stayInLines: S.stayInLines, sound: S.sound })); } catch { /* ignore */ }
+  try { localStorage.setItem('cb.settings', JSON.stringify({ stayInLines: S.stayInLines, closeGaps: S.closeGaps, autoFullscreen: S.autoFullscreen, sound: S.sound })); } catch { /* ignore */ }
 }
 
 // ------------------------------------------------------------------ small UI helpers
@@ -146,7 +163,7 @@ function loadPage(i) {
     const raw = await source.renderLine(i, LONG_SIDE);
     const { width: w, height: h } = raw;
     const img = raw.getContext('2d').getImageData(0, 0, w, h);
-    const { alpha, wall } = analyzeLineArt(img.data, w, h);
+    const { alpha, wall, core } = analyzeLineArt(img.data, w, h);
     // Turn the render into a transparent layer of black lines.
     for (let k = 0, j = 0; k < alpha.length; k++, j += 4) {
       img.data[j] = img.data[j + 1] = img.data[j + 2] = 0;
@@ -166,7 +183,7 @@ function loadPage(i) {
       } catch (err) { console.warn('Could not restore colors for page', i + 1, err); }
     }
     if (S.book !== book) return p; // the book was closed while loading
-    Object.assign(p, { w, h, line, paint, walls: new WallSet(wall, w, h) });
+    Object.assign(p, { w, h, line, paint, walls: new WallSet(wall, w, h, core) });
     return p;
   })();
   p.loading.catch(() => { p.loading = null; });
@@ -309,6 +326,8 @@ function updateUI() {
   wheelBtn.style.setProperty('--picked', S.customColor || 'transparent');
   $('mLines').setAttribute('aria-checked', String(S.stayInLines));
   $('mLinesState').textContent = S.stayInLines ? 'On' : 'Off';
+  $('mGaps').setAttribute('aria-checked', String(S.closeGaps));
+  $('mGapsState').textContent = S.closeGaps ? 'On' : 'Off';
   $('mSound').setAttribute('aria-checked', String(S.sound));
   $('mSoundState').textContent = S.sound ? 'On' : 'Off';
 }
@@ -365,7 +384,7 @@ function doFill(clientX, clientY) {
   const k = p.w / r.width;
   const x = (clientX - r.left) * k;
   const y = (clientY - r.top) * k;
-  const res = smartRegion(p.walls, x, y, Math.round(SNAP_RADIUS * k));
+  const res = smartRegion(p.walls, x, y, Math.round(SNAP_RADIUS * k), { closeGaps: S.closeGaps });
   if (!res) {
     slide.paper.classList.remove('nope');
     void slide.paper.offsetWidth; // restart the little shake
@@ -394,7 +413,7 @@ function ensureWet(w, h) {
 }
 
 function makeRegionMask(p, x, y, k) {
-  const res = smartRegion(p.walls, x, y, Math.round(SNAP_RADIUS * k));
+  const res = smartRegion(p.walls, x, y, Math.round(SNAP_RADIUS * k), { closeGaps: S.closeGaps });
   if (!res) return null; // started on a line with no shape nearby: paint freely
   const bmp = buildFillBitmap(res, p.w, p.h, [0, 0, 0]);
   const c = newCanvas(bmp.w, bmp.h);
@@ -879,7 +898,9 @@ function bindMenu() {
     if (await confirmDialog('Clear all the color from this page?', 'Clear it')) clearPage();
   });
   $('mLines').addEventListener('click', () => { S.stayInLines = !S.stayInLines; saveSettings(); updateUI(); });
+  $('mGaps').addEventListener('click', () => { S.closeGaps = !S.closeGaps; saveSettings(); updateUI(); });
   $('mSound').addEventListener('click', () => { S.sound = !S.sound; saveSettings(); updateUI(); });
+  $('mFull').addEventListener('click', () => { el.menu.hidden = true; toggleFullscreen(); });
   $('pagesClose').addEventListener('click', () => { el.pages.hidden = true; });
   el.pages.addEventListener('pointerdown', (e) => { if (e.target === el.pages) el.pages.hidden = true; });
 }
@@ -1048,6 +1069,46 @@ function bindLibrary() {
   });
 }
 
+// ------------------------------------------------------------------ full screen and zoom
+
+const rootEl = document.documentElement;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
+const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+const canFullscreen = () => !!(rootEl.requestFullscreen || rootEl.webkitRequestFullscreen);
+
+async function toggleFullscreen() {
+  try {
+    if (fullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else await (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl);
+  } catch {
+    toast('This browser will not go full screen. Use "Add to Home screen" to install the app instead.');
+  }
+}
+
+// Browsers only allow full screen after a tap, so go full screen on the first one.
+// An installed app (Add to Home screen) is already full screen, so it is left alone.
+function setupFullscreen() {
+  $('mFull').hidden = !canFullscreen() || isStandalone();
+  $('mInstallTip').hidden = isStandalone();
+  if (!S.autoFullscreen || isStandalone() || !canFullscreen()) return;
+  const first = () => {
+    document.removeEventListener('pointerup', first, true);
+    if (!fullscreenElement()) (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl).catch(() => {});
+  };
+  document.addEventListener('pointerup', first, true);
+}
+
+// If the screen ever ends up pinch-zoomed (everything looks too big and runs off the edge), say how to fix it.
+function watchZoom() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  let warned = false;
+  vv.addEventListener('resize', () => {
+    if (vv.scale > 1.05 && !warned) { warned = true; toast('The screen is zoomed in. Pinch two fingers together to zoom back out.'); }
+    if (vv.scale <= 1.01) warned = false;
+  });
+}
+
 // ------------------------------------------------------------------ start
 
 function relayout() {
@@ -1064,6 +1125,8 @@ buildTools();
 buildPalette();
 bindWheel();
 bindMenu();
+setupFullscreen();
+watchZoom();
 bindLibrary();
 updateUI();
 new ResizeObserver(relayout).observe(el.stage);
