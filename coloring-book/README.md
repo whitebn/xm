@@ -23,7 +23,7 @@ It is a web app (it also installs to a phone or tablet home screen). There is no
 - **Swipe between pages.** See the gesture table below. Big arrow buttons and a "pick a picture" grid are always available too.
 - **Saves automatically.** Close the app and come back later. The book and every colored page are still there.
 - **Works offline** after the first visit.
-- **Full screen.** On Android (Chrome) the first tap takes the page full screen, and the grown-ups menu has a Full screen button. For a true full-screen app with no browser bars, install it (Chrome: menu, then Install app or Add to Home screen. Safari on iPad: Share, then Add to Home Screen) and open it from the new icon. Full screen is not offered in a Safari tab on iPad on purpose: Safari shows an exit button that cannot be hidden and a swipe down exits it, which is wrong for a toddler. Installing it avoids both.
+- **Full screen.** On Android (Chrome) the first tap takes the app full screen, and it goes back to full screen on the next tap if something takes it out (switching apps, pulling down the system bars). The grown-ups menu has a Full screen button, and if a grown-up leaves full screen with it the app stops pulling them back in. **This also applies to the installed app.** An installed app opens in "standalone" mode, which still shows the system status bar and the back / home / recents buttons, so it needs this too. For the best result also install it (Chrome: menu, then Install app or Add to Home screen. Safari on iPad: Share, then Add to Home Screen). Full screen is not offered in a Safari tab on iPad on purpose: Safari shows an exit button that cannot be hidden and a swipe down exits it, which is wrong for a toddler. Installing it avoids both.
 - **No accidental zoom.** Pinch-zoom is switched off so a toddler cannot zoom the page and push the buttons off screen. If it ever does end up zoomed, the app says so.
 - **Grown-ups menu.** Hidden behind a press-and-hold lock button so a toddler cannot wander off. It has: all books, add a PDF, full screen, save the picture, clear the page, the gap-closing switch, sounds on/off, and "painting tools stay inside the lines".
 
@@ -52,6 +52,21 @@ Open <http://localhost:8080>. The app must be served over http, so opening `inde
 Browsers only allow offline mode and "Add to Home Screen" on **HTTPS** (or `localhost`). A `http://192.168.x.x` address on your home network will let you try the app, but it will not install or work offline. To really put it on a tablet, host the `coloring-book` folder on any static host with HTTPS, for example GitHub Pages, Netlify or Cloudflare Pages. It is just static files, so there is no build step. Then open the address on the tablet and choose **Add to Home Screen** (Safari: Share, then Add to Home Screen. Chrome: menu, then Install app).
 
 Installing it to the home screen is also the best way to use it with a toddler, because it opens full screen with no browser bars to tap by accident.
+
+## Keeping little hands off the buttons
+
+A child leaning on the tablet can press buttons with a belly or palm. The app ignores a touch on the top or bottom buttons (and the click it would cause) when any of these is true:
+
+- the contact is bigger than a fingertip (wider or taller than 80 CSS pixels),
+- a finger is already painting or swiping on the picture,
+- the press is held longer than about 0.9 seconds (the grown-ups lock and the clear button are meant to be held, so they are exempt from this one).
+
+The buttons also sit at least 20 pixels above the bottom edge of the screen.
+
+Limits, honestly:
+- A tablet that does not report how big a contact is cannot use the first rule. The other two still apply.
+- The app cannot block the **system** buttons (back, home, recents) or the system's edge-swipe gestures. Full screen hides them, but a swipe from the screen edge can still show them for a moment.
+- For a hard lock, use the device's own feature, which also blocks the system buttons. On Android this is "screen pinning" (App pinning), and on iPad "Guided Access" (which can also disable the bottom of the screen). The menu names differ between devices, so check your device's settings.
 
 ## Which devices work
 

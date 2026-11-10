@@ -7,7 +7,7 @@ import { setupColorWheel } from './colorwheel.js';
 
 // If the page and this script ever come from different versions (an interrupted update), clear the
 // saved copies and reload once so the app repairs itself. Books and colors are not touched.
-const APP_VERSION = '5';
+const APP_VERSION = '6';
 (function selfHeal() {
   const pageVersion = document.querySelector('meta[name="cb-version"]')?.content;
   if (pageVersion === APP_VERSION) return;
@@ -639,7 +639,7 @@ function onDown(e) {
   if (!S.book) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   // Best effort palm rejection: ignore very large touch contacts (a resting hand).
-  if (e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > 64) return;
+  if (e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > BIG_TOUCH_PX) return;
   try { el.track.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone: harmless */ }
   G.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
   if (G.pointers.size > 1) return; // extra fingers never change the mode by themselves
@@ -1103,40 +1103,108 @@ function bindLibrary() {
   });
 }
 
-// ------------------------------------------------------------------ full screen and zoom
+// ------------------------------------------------------------------ full screen, and keeping little hands off the buttons
 
 const rootEl = document.documentElement;
 // Safari on iPad does offer full screen, but with an exit button that cannot be hidden and a swipe-down that exits,
 // which is wrong for a toddler. On iOS the right answer is Add to Home Screen, so full screen is not offered there.
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
+// "Installed" (standalone) is NOT full screen on Android: the status bar and the back / home / recents buttons are still
+// on screen, and a child's belly can press them. Only display-mode "fullscreen" or the Fullscreen API hides them.
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+const inFullscreen = () => !!fullscreenElement() || matchMedia('(display-mode: fullscreen)').matches;
 const canFullscreen = () => !!(rootEl.requestFullscreen || rootEl.webkitRequestFullscreen);
+const requestFs = () => (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl);
+
+let fsOptOut = false; // a grown-up chose to leave full screen: stop taking the page back to it until the app is reopened
 
 async function toggleFullscreen() {
   try {
-    if (fullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    else await (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl);
+    if (fullscreenElement()) { fsOptOut = true; await (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+    else { fsOptOut = false; await requestFs(); }
   } catch {
     toast('This browser will not go full screen. Use "Add to Home screen" to install the app instead.');
   }
 }
 
-// Browsers only allow full screen after a tap, so go full screen on the first one.
-// An installed app (Add to Home screen) is already full screen, so it is left alone.
+// Browsers only allow full screen right after a tap, so go full screen on the first tap, and again on the next tap
+// if something takes the app out of it (coming back from another app, the system bars being pulled down).
+let fsArmed = false;
+function armFullscreen() {
+  if (fsArmed || fsOptOut || !S.autoFullscreen || isIOS() || !canFullscreen() || inFullscreen()) return;
+  fsArmed = true;
+  const go = () => {
+    document.removeEventListener('pointerup', go, true);
+    fsArmed = false;
+    if (!fsOptOut && !inFullscreen()) requestFs().catch(() => {});
+  };
+  document.addEventListener('pointerup', go, true);
+}
+
 function setupFullscreen() {
   const ios = isIOS();
-  $('mFull').hidden = ios || !canFullscreen() || isStandalone();
-  $('mInstallTip').hidden = isStandalone();
+  // The Full screen button is shown everywhere it can work, including the installed app (where it was wrongly hidden before).
+  $('mFull').hidden = ios || !canFullscreen() || matchMedia('(display-mode: fullscreen)').matches;
+  $('mInstallTip').hidden = isInstalled();
   $('mInstallTip').innerHTML = ios
     ? 'For full screen, install it: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. Open it from the new icon. It also keeps your colors safe.'
     : 'For a true full-screen app, install it: open the Chrome menu and tap <b>Install app</b> or <b>Add to Home screen</b>. Then open it from the new icon.';
-  if (!S.autoFullscreen || ios || isStandalone() || !canFullscreen()) return;
-  const first = () => {
-    document.removeEventListener('pointerup', first, true);
-    if (!fullscreenElement()) (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl).catch(() => {});
-  };
-  document.addEventListener('pointerup', first, true);
+  armFullscreen();
+  document.addEventListener('fullscreenchange', armFullscreen);
+  document.addEventListener('webkitfullscreenchange', armFullscreen);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') armFullscreen(); });
+}
+
+// A child lying or leaning on the tablet presses the buttons with their belly or palm. Three things tell that apart from a tap:
+//   1. the contact is big (a fingertip is about 40 px across, a belly or palm is far more)
+//   2. a finger is already painting or swiping on the picture, so a second touch on the buttons is not a deliberate tap
+//   3. the press lasts a long time (a tap is a fraction of a second, something resting on the screen is not)
+// Touches caught by these rules are ignored completely, including the click that follows when they lift.
+const BIG_TOUCH_PX = 80;     // CSS px: a contact wider or taller than this is not a fingertip
+const LONG_PRESS_MS = 900;   // a button press held longer than this is not a tap
+function guardButtons() {
+  const onButtons = (t) => t instanceof Element && !!t.closest('.topbar, .toolbar');
+  const ignored = new Map();   // pointerId -> true while the touch is being ignored
+  const downAt = new Map();    // pointerId -> when it went down on the buttons
+  let suppress = null;         // { x, y, until }: the one spot whose click is being swallowed
+  const swallowClickAt = (e) => { suppress = { x: e.clientX, y: e.clientY, until: performance.now() + 300 }; };
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!onButtons(e.target)) return;
+    const big = e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > BIG_TOUCH_PX;
+    if (big || G.pointers.size > 0) {
+      ignored.set(e.pointerId, true);
+      e.stopPropagation();
+      e.preventDefault();
+    } else {
+      downAt.set(e.pointerId, performance.now());
+    }
+  }, true);
+
+  for (const type of ['pointermove', 'pointerup', 'pointercancel']) {
+    document.addEventListener(type, (e) => {
+      if (ignored.has(e.pointerId)) {
+        e.stopPropagation();
+        if (type !== 'pointermove') { ignored.delete(e.pointerId); swallowClickAt(e); }
+        return;
+      }
+      if (type !== 'pointermove' && downAt.has(e.pointerId)) {
+        const held = performance.now() - downAt.get(e.pointerId);
+        downAt.delete(e.pointerId);
+        // press-and-hold buttons (grown-ups menu, clear) are meant to be held, and have their own timer
+        if (held > LONG_PRESS_MS && type === 'pointerup' && onButtons(e.target) && !e.target.closest('.hold')) swallowClickAt(e);
+      }
+    }, true);
+  }
+
+  document.addEventListener('click', (e) => {
+    // only the click that this touch would have caused: same place, right after. Taps anywhere else, and keyboard clicks, are untouched.
+    if (suppress && performance.now() < suppress.until && Math.hypot(e.clientX - suppress.x, e.clientY - suppress.y) < 40 && onButtons(e.target)) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
 }
 
 // If the screen ever ends up pinch-zoomed (everything looks too big and runs off the edge), say how to fix it.
@@ -1167,6 +1235,7 @@ buildPalette();
 bindWheel();
 bindMenu();
 setupFullscreen();
+guardButtons();
 watchZoom();
 bindLibrary();
 updateUI();

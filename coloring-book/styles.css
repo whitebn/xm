@@ -266,7 +266,7 @@ h1 span:nth-child(5n)   { color: #a855f7; }
   background: var(--panel);
   border-radius: 28px 28px 0 0;
   box-shadow: 0 -6px 24px rgba(43, 35, 80, .14);
-  padding: 10px 12px 12px;
+  padding: 10px 12px 26px; /* extra room at the bottom: a belly against the edge of the tablet should not reach a button */
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -361,7 +361,7 @@ h1 span:nth-child(5n)   { color: #a855f7; }
   .round.sm { width: 40px; height: 40px; }
   .counter { min-width: 70px; height: 46px; padding: 0 8px; font-size: 1.02rem; gap: 4px; }
   .counter .icon { display: none; }
-  .toolbar { padding: 8px 8px 10px; gap: 8px; }
+  .toolbar { padding: 8px 8px 22px; gap: 8px; }
   .tools { gap: 3px; }
   .tool { min-width: 44px; width: 44px; height: 48px; padding: 4px; border-width: 3px; border-radius: 16px; }
   .tool span { display: none; }
@@ -392,7 +392,7 @@ h1 span:nth-child(5n)   { color: #a855f7; }
     flex-wrap: nowrap;
     justify-content: center;
     gap: 8px;
-    padding: 8px 12px;
+    padding: 8px 22px 8px 12px; /* keep the rail off the right edge of the screen */
     border-radius: 24px 0 0 24px;
     box-shadow: -6px 0 24px rgba(43, 35, 80, .14);
     overflow-y: auto;
