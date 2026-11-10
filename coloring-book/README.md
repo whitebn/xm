@@ -7,9 +7,10 @@ It is a web app (it also installs to a phone or tablet home screen). There is no
 ## What it does
 
 - **Import a PDF.** Every page becomes a picture. Vector PDFs and scanned or photographed pages both work.
-- **Fill.** Tap a color, then tap a shape. The color stops at the lines.
+- **Fill.** Tap a color, then tap a shape. The color goes right up to the lines, with no white halo beside them.
   - A tap that lands on the line itself (easy to do with a small finger) fills the nearest shape.
-  - Gaps in the lines are handled. If a shape is almost closed (a gap up to about 0.1 inch on a letter page) the fill stays inside the shape. Tapping the background does not flood into such a shape either.
+  - A fill is exact: it fills everything the lines enclose, narrow passages included, so a face fills in one tap.
+  - **Leak guard.** If a shape has a small gap in its outline, a fill could escape and color the whole page. The app notices when a fill reaches the page edge and the shape would be closed if its gaps were closed (gaps up to about 0.1 inch), and keeps the color inside the shape. This can be switched off in the grown-ups menu ("Fill stops at small gaps in the lines") if you prefer plain fills.
 - **Paint tools.** Pick a texture, a color and one of three sizes. The black lines always stay visible on top of the color.
   - **Paint**: a translucent highlighter.
   - **Spray**: a speckled spray can. Hold still and it gets denser.
@@ -22,7 +23,9 @@ It is a web app (it also installs to a phone or tablet home screen). There is no
 - **Swipe between pages.** See the gesture table below. Big arrow buttons and a "pick a picture" grid are always available too.
 - **Saves automatically.** Close the app and come back later. The book and every colored page are still there.
 - **Works offline** after the first visit.
-- **Grown-ups menu.** Hidden behind a press-and-hold lock button so a toddler cannot wander off. It has: all books, add a PDF, save the picture, clear the page, sounds on/off, and "painting tools stay inside the lines".
+- **Full screen.** The first tap takes the page full screen where the browser allows it, and the grown-ups menu has a Full screen button. For a true full-screen app with no browser bars, install it (Chrome: menu, then Install app or Add to Home screen. Safari: Share, then Add to Home Screen) and open it from the new icon.
+- **No accidental zoom.** Pinch-zoom is switched off so a toddler cannot zoom the page and push the buttons off screen. If it ever does end up zoomed, the app says so.
+- **Grown-ups menu.** Hidden behind a press-and-hold lock button so a toddler cannot wander off. It has: all books, add a PDF, full screen, save the picture, clear the page, the gap-closing switch, sounds on/off, and "painting tools stay inside the lines".
 
 ### Gestures
 
@@ -89,7 +92,8 @@ Unit tests cover the fill logic: staying inside a shape, not leaking through a g
 ## Known limits
 
 - No zoom. Very detailed pages (mandalas with hundreds of tiny shapes) are hard to fill with a finger.
-- Fill treats every enclosed area as one shape. Gaps wider than about 0.1 inch (on a letter-size page) are not closed, so a shape with a big opening will still leak. The same gap closing means a very narrow corridor between two shapes is treated as closed too.
+- Fill treats every enclosed area as one shape. Gaps wider than about 0.1 inch (on a letter-size page) are not closed, so a shape with a big opening will still leak. Tapping the real background floods everything connected to it, including into a shape that has a gap.
+- Where a line has no solid core (a very pale or very thin gray line), color can creep a few pixels under it.
 - Colors are saved per device and browser. Clearing the browser's site data erases them.
 - Page images are rendered at about 1800 pixels on the long side. Pages with very different aspect ratios are fitted to the screen.
 - The palm rejection (ignoring a large touch contact) is a best effort that depends on what the device reports.
