@@ -7,7 +7,7 @@ import { setupColorWheel } from './colorwheel.js';
 
 // If the page and this script ever come from different versions (an interrupted update), clear the
 // saved copies and reload once so the app repairs itself. Books and colors are not touched.
-const APP_VERSION = '4';
+const APP_VERSION = '6';
 (function selfHeal() {
   const pageVersion = document.querySelector('meta[name="cb-version"]')?.content;
   if (pageVersion === APP_VERSION) return;
@@ -24,7 +24,7 @@ const LONG_SIDE = 1800;          // pixels on the long edge of each page's canva
 const GAP = 28;                  // px between pages while swiping
 const PAD = 14;                  // px of margin around the paper
 const UNDO_MAX = 30;             // undo steps kept per page
-const UNDO_PIXEL_BUDGET = 16e6;  // roughly 64 MB of undo images per page
+const UNDO_PIXEL_BUDGET = 12e6;  // roughly 48 MB of undo images per page (iPad Safari limits canvas memory)
 const SNAP_RADIUS = 18;          // CSS px: a tap this close to a line still fills the nearest shape
 const SWIPE_FRACTION = 0.22;     // drag this far (of the width) to turn the page
 const SWIPE_VELOCITY = 0.45;     // or flick faster than this (px per ms)
@@ -149,6 +149,27 @@ function pop() {
 
 // ------------------------------------------------------------------ pages: load, save, free
 
+// Turn saved PNG bytes into something drawImage accepts. createImageBitmap needs iPadOS 15, so fall back to an <img>.
+async function decodePng(buf) {
+  const blob = new Blob([buf], { type: 'image/png' });
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(blob); } catch { /* fall through to <img> */ }
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Safari on iPad kills a page that holds too many big canvases, and does not free a canvas
+// just because nothing points at it any more. Setting its size to 0 releases the memory right away.
+const release = (canvas) => { if (canvas) canvas.width = canvas.height = 0; };
+
 function makePage(i) {
   return { i, w: 0, h: 0, line: null, paint: null, walls: null, loading: null, dirty: false, undo: [] };
 }
@@ -171,13 +192,14 @@ function loadPage(i) {
     }
     const line = newCanvas(w, h);
     line.getContext('2d').putImageData(img, 0, 0);
+    release(raw);
 
     const paint = newCanvas(w, h);
     await S.pending.get(i);
     const saved = await store.getPaint(book.id, i);
     if (saved) {
       try {
-        const bmp = await createImageBitmap(new Blob([saved], { type: 'image/png' }));
+        const bmp = await decodePng(saved);
         paint.getContext('2d').drawImage(bmp, 0, 0, w, h);
         bmp.close?.();
       } catch (err) { console.warn('Could not restore colors for page', i + 1, err); }
@@ -191,13 +213,16 @@ function loadPage(i) {
 }
 
 function freePage(p) {
+  release(p.line);
+  release(p.paint);
+  p.undo.forEach((u) => release(u.c));
   Object.assign(p, { line: null, paint: null, walls: null, loading: null, undo: [], dirty: false });
 }
 
 // Keep memory small: only pages near the current one stay in memory.
 function evict() {
   for (const p of S.pages) {
-    if (p.line && Math.abs(p.i - S.cur) > 2 && !S.slides.has(p.i)) {
+    if (p.line && Math.abs(p.i - S.cur) > 1 && !S.slides.has(p.i)) {
       if (p.dirty) savePage(p);
       freePage(p);
     }
@@ -342,6 +367,7 @@ function pushUndo(p, x, y, w, h, source = p.paint) {
   while (p.undo.length > UNDO_MAX || (total > UNDO_PIXEL_BUDGET && p.undo.length > 1)) {
     const old = p.undo.shift();
     total -= old.w * old.h;
+    release(old.c);
   }
 }
 
@@ -352,6 +378,7 @@ function undo() {
   const ctx = p.paint.getContext('2d');
   ctx.clearRect(u.x, u.y, u.w, u.h);
   ctx.drawImage(u.c, u.x, u.y);
+  release(u.c);
   markDirty(p);
   updateUI();
 }
@@ -397,6 +424,7 @@ function doFill(clientX, clientY) {
   fillTmp.height = bmp.h;
   fillTmp.getContext('2d').putImageData(new ImageData(bmp.data, bmp.w, bmp.h), 0, 0);
   p.paint.getContext('2d').drawImage(fillTmp, bmp.x, bmp.y);
+  release(fillTmp);
   ripple(slide, clientX, clientY);
   pop();
   markDirty(p);
@@ -538,10 +566,13 @@ function endStroke() {
     pc.drawImage(S.wet, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
     pc.restore();
     S.wet.remove();
+    release(S.wet);
   } else {
     st.ctx.restore();
     pushUndo(p, r.x, r.y, r.w, r.h, st.before);
+    release(st.before);
   }
+  release(st.mask?.canvas);
   markDirty(p);
   updateUI();
 }
@@ -553,12 +584,15 @@ function cancelStroke() {
   clearInterval(st.timer);
   if (st.spec.kind === 'paint') {
     S.wet?.remove();
+    release(S.wet);
   } else if (st.p.paint) {
     st.ctx.restore();
     const ctx = st.p.paint.getContext('2d');
     ctx.clearRect(0, 0, st.p.w, st.p.h);
     ctx.drawImage(st.before, 0, 0);
+    release(st.before);
   }
+  release(st.mask?.canvas);
 }
 
 // ------------------------------------------------------------------ gestures
@@ -605,7 +639,7 @@ function onDown(e) {
   if (!S.book) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   // Best effort palm rejection: ignore very large touch contacts (a resting hand).
-  if (e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > 64) return;
+  if (e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > BIG_TOUCH_PX) return;
   try { el.track.setPointerCapture(e.pointerId); } catch { /* the pointer is already gone: harmless */ }
   G.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
   if (G.pointers.size > 1) return; // extra fingers never change the mode by themselves
@@ -791,7 +825,7 @@ async function makeThumb(i, book = S.book, source = S.source) {
     const saved = await store.getPaint(book.id, i);
     if (saved) {
       try {
-        const bmp = await createImageBitmap(new Blob([saved], { type: 'image/png' }));
+        const bmp = await decodePng(saved);
         ctx.drawImage(bmp, 0, 0, out.width, out.height);
         bmp.close?.();
       } catch { /* show the plain page */ }
@@ -973,7 +1007,7 @@ async function openBook(book, source) {
 }
 
 function teardownBook() {
-  S.pages.forEach((p) => { p.loading = null; });
+  S.pages.forEach((p) => { p.loading = null; freePage(p); });
   S.book = null;
   S.source = null;
   S.pages = [];
@@ -1069,33 +1103,108 @@ function bindLibrary() {
   });
 }
 
-// ------------------------------------------------------------------ full screen and zoom
+// ------------------------------------------------------------------ full screen, and keeping little hands off the buttons
 
 const rootEl = document.documentElement;
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
+// Safari on iPad does offer full screen, but with an exit button that cannot be hidden and a swipe-down that exits,
+// which is wrong for a toddler. On iOS the right answer is Add to Home Screen, so full screen is not offered there.
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// "Installed" (standalone) is NOT full screen on Android: the status bar and the back / home / recents buttons are still
+// on screen, and a child's belly can press them. Only display-mode "fullscreen" or the Fullscreen API hides them.
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+const inFullscreen = () => !!fullscreenElement() || matchMedia('(display-mode: fullscreen)').matches;
 const canFullscreen = () => !!(rootEl.requestFullscreen || rootEl.webkitRequestFullscreen);
+const requestFs = () => (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl);
+
+let fsOptOut = false; // a grown-up chose to leave full screen: stop taking the page back to it until the app is reopened
 
 async function toggleFullscreen() {
   try {
-    if (fullscreenElement()) await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    else await (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl);
+    if (fullscreenElement()) { fsOptOut = true; await (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+    else { fsOptOut = false; await requestFs(); }
   } catch {
     toast('This browser will not go full screen. Use "Add to Home screen" to install the app instead.');
   }
 }
 
-// Browsers only allow full screen after a tap, so go full screen on the first one.
-// An installed app (Add to Home screen) is already full screen, so it is left alone.
-function setupFullscreen() {
-  $('mFull').hidden = !canFullscreen() || isStandalone();
-  $('mInstallTip').hidden = isStandalone();
-  if (!S.autoFullscreen || isStandalone() || !canFullscreen()) return;
-  const first = () => {
-    document.removeEventListener('pointerup', first, true);
-    if (!fullscreenElement()) (rootEl.requestFullscreen || rootEl.webkitRequestFullscreen).call(rootEl).catch(() => {});
+// Browsers only allow full screen right after a tap, so go full screen on the first tap, and again on the next tap
+// if something takes the app out of it (coming back from another app, the system bars being pulled down).
+let fsArmed = false;
+function armFullscreen() {
+  if (fsArmed || fsOptOut || !S.autoFullscreen || isIOS() || !canFullscreen() || inFullscreen()) return;
+  fsArmed = true;
+  const go = () => {
+    document.removeEventListener('pointerup', go, true);
+    fsArmed = false;
+    if (!fsOptOut && !inFullscreen()) requestFs().catch(() => {});
   };
-  document.addEventListener('pointerup', first, true);
+  document.addEventListener('pointerup', go, true);
+}
+
+function setupFullscreen() {
+  const ios = isIOS();
+  // The Full screen button is shown everywhere it can work, including the installed app (where it was wrongly hidden before).
+  $('mFull').hidden = ios || !canFullscreen() || matchMedia('(display-mode: fullscreen)').matches;
+  $('mInstallTip').hidden = isInstalled();
+  $('mInstallTip').innerHTML = ios
+    ? 'For full screen, install it: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. Open it from the new icon. It also keeps your colors safe.'
+    : 'For a true full-screen app, install it: open the Chrome menu and tap <b>Install app</b> or <b>Add to Home screen</b>. Then open it from the new icon.';
+  armFullscreen();
+  document.addEventListener('fullscreenchange', armFullscreen);
+  document.addEventListener('webkitfullscreenchange', armFullscreen);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') armFullscreen(); });
+}
+
+// A child lying or leaning on the tablet presses the buttons with their belly or palm. Three things tell that apart from a tap:
+//   1. the contact is big (a fingertip is about 40 px across, a belly or palm is far more)
+//   2. a finger is already painting or swiping on the picture, so a second touch on the buttons is not a deliberate tap
+//   3. the press lasts a long time (a tap is a fraction of a second, something resting on the screen is not)
+// Touches caught by these rules are ignored completely, including the click that follows when they lift.
+const BIG_TOUCH_PX = 80;     // CSS px: a contact wider or taller than this is not a fingertip
+const LONG_PRESS_MS = 900;   // a button press held longer than this is not a tap
+function guardButtons() {
+  const onButtons = (t) => t instanceof Element && !!t.closest('.topbar, .toolbar');
+  const ignored = new Map();   // pointerId -> true while the touch is being ignored
+  const downAt = new Map();    // pointerId -> when it went down on the buttons
+  let suppress = null;         // { x, y, until }: the one spot whose click is being swallowed
+  const swallowClickAt = (e) => { suppress = { x: e.clientX, y: e.clientY, until: performance.now() + 300 }; };
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!onButtons(e.target)) return;
+    const big = e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > BIG_TOUCH_PX;
+    if (big || G.pointers.size > 0) {
+      ignored.set(e.pointerId, true);
+      e.stopPropagation();
+      e.preventDefault();
+    } else {
+      downAt.set(e.pointerId, performance.now());
+    }
+  }, true);
+
+  for (const type of ['pointermove', 'pointerup', 'pointercancel']) {
+    document.addEventListener(type, (e) => {
+      if (ignored.has(e.pointerId)) {
+        e.stopPropagation();
+        if (type !== 'pointermove') { ignored.delete(e.pointerId); swallowClickAt(e); }
+        return;
+      }
+      if (type !== 'pointermove' && downAt.has(e.pointerId)) {
+        const held = performance.now() - downAt.get(e.pointerId);
+        downAt.delete(e.pointerId);
+        // press-and-hold buttons (grown-ups menu, clear) are meant to be held, and have their own timer
+        if (held > LONG_PRESS_MS && type === 'pointerup' && onButtons(e.target) && !e.target.closest('.hold')) swallowClickAt(e);
+      }
+    }, true);
+  }
+
+  document.addEventListener('click', (e) => {
+    // only the click that this touch would have caused: same place, right after. Taps anywhere else, and keyboard clicks, are untouched.
+    if (suppress && performance.now() < suppress.until && Math.hypot(e.clientX - suppress.x, e.clientY - suppress.y) < 40 && onButtons(e.target)) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
 }
 
 // If the screen ever ends up pinch-zoomed (everything looks too big and runs off the edge), say how to fix it.
@@ -1126,6 +1235,7 @@ buildPalette();
 bindWheel();
 bindMenu();
 setupFullscreen();
+guardButtons();
 watchZoom();
 bindLibrary();
 updateUI();
