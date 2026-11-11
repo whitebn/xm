@@ -2,12 +2,13 @@ import * as store from './store.js';
 import { PdfSource, SampleSource } from './sources.js';
 import { analyzeLineArt, buildFillBitmap, WallSet, smartRegion } from './fill.js';
 import * as Brush from './brushes.js';
-import { TOOLS, TOOL_ORDER } from './brushes.js';
+import { TOOLS, BRUSHES, STAMP_SHAPES, sizeFor, drawStamp } from './brushes.js';
+import { PATTERNS, makeTile, tileUrl } from './patterns.js';
 import { setupColorWheel } from './colorwheel.js';
 
 // If the page and this script ever come from different versions (an interrupted update), clear the
 // saved copies and reload once so the app repairs itself. Books and colors are not touched.
-const APP_VERSION = '6';
+const APP_VERSION = '7';
 (function selfHeal() {
   const pageVersion = document.querySelector('meta[name="cb-version"]')?.content;
   if (pageVersion === APP_VERSION) return;
@@ -30,17 +31,48 @@ const SWIPE_FRACTION = 0.22;     // drag this far (of the width) to turn the pag
 const SWIPE_VELOCITY = 0.45;     // or flick faster than this (px per ms)
 const SWIPE_START = 48;          // CSS px a finger must travel sideways before the page starts to move.
                                  // Smaller wobbles (every toddler tap has some) never move the page.
-const COLORS = [
-  ['Red', '#e53935'], ['Orange', '#fb8c00'], ['Yellow', '#fdd835'], ['Light green', '#9ccc3c'],
-  ['Green', '#2e9e4f'], ['Sky blue', '#4fc3f7'], ['Blue', '#1e5fd8'], ['Purple', '#8e3bb8'],
-  ['Pink', '#f78fb3'], ['Peach', '#ffc99a'], ['Brown', '#8a5a3c'], ['Black', '#26232e'],
+// The color sets shown by the tabs next to the size slider. The last tab holds patterns for the Fill tool.
+const COLOR_SETS = [
+  {
+    id: 'bright', label: 'Bright colors', tab: 'conic-gradient(#e53935, #fdd835, #43a047, #1e88e5, #8e24aa, #e53935)',
+    colors: [
+      ['Red', '#e53935'], ['Orange', '#fb8c00'], ['Yellow', '#fdd835'], ['Light green', '#9ccc3c'],
+      ['Green', '#2e9e4f'], ['Sky blue', '#4fc3f7'], ['Blue', '#1e5fd8'], ['Purple', '#8e3bb8'],
+      ['Pink', '#f78fb3'], ['Peach', '#ffc99a'], ['Brown', '#8a5a3c'], ['Black', '#26232e'],
+    ],
+  },
+  {
+    id: 'pastel', label: 'Pastel colors', tab: 'linear-gradient(135deg, #ffb3ba, #ffffba, #baffc9, #bae1ff)',
+    colors: [
+      ['Pastel pink', '#ffb3ba'], ['Pastel peach', '#ffdfba'], ['Pastel yellow', '#ffffba'], ['Pastel mint', '#baffc9'],
+      ['Pastel blue', '#bae1ff'], ['Pastel lilac', '#e0bbff'], ['Pastel rose', '#ffc8dd'], ['Pastel violet', '#cdb4db'],
+      ['Pastel sky', '#a2d2ff'], ['Pastel seafoam', '#b5ead7'], ['Pastel apricot', '#ffdac1'], ['Pastel lime', '#e2f0cb'],
+    ],
+  },
+  {
+    id: 'skin', label: 'Skin and earth tones', tab: 'linear-gradient(135deg, #fde0c5, #c68642, #6b3e1f)',
+    colors: [
+      ['Fair', '#ffdbac'], ['Light', '#fde0c5'], ['Cream', '#f1c27d'], ['Peach skin', '#f8c9a0'],
+      ['Tan', '#e0ac69'], ['Golden', '#c68642'], ['Warm brown', '#b9794f'], ['Brown skin', '#8d5524'],
+      ['Deep brown', '#6b3e1f'], ['Dark brown', '#4a2c17'], ['Sand', '#e8b48a'], ['Clay', '#d29a6e'],
+    ],
+  },
+  {
+    id: 'grey', label: 'Greys and darks', tab: 'linear-gradient(135deg, #f5f5f5, #9e9e9e, #263238)',
+    colors: [
+      ['White', '#f5f5f5'], ['Light grey', '#d9d9d9'], ['Silver', '#bdbdbd'], ['Grey', '#9e9e9e'],
+      ['Mid grey', '#757575'], ['Dark grey', '#616161'], ['Charcoal', '#424242'], ['Near black', '#212121'],
+      ['Taupe', '#8d6e63'], ['Slate', '#607d8b'], ['Steel', '#455a64'], ['Midnight', '#37474f'],
+    ],
+  },
+  { id: 'pattern', label: 'Patterns', tab: 'radial-gradient(circle, #8e3bb8 22%, transparent 24%) 0 0 / 11px 11px, #ffe58a', colors: [] },
 ];
 
 const $ = (id) => document.getElementById(id);
 const el = {
   library: $('library'), shelf: $('shelf'), book: $('book'), stage: $('stage'), track: $('track'),
   prev: $('prevBtn'), next: $('nextBtn'), counter: $('counter'), counterText: $('counterText'),
-  undo: $('undoBtn'), palette: $('palette'), sizes: $('sizes'), file: $('file'),
+  undo: $('undoBtn'), palette: $('palette'), sizebox: $('sizebox'), file: $('file'),
   menu: $('menu'), pages: $('pages'), pageGrid: $('pageGrid'), confirm: $('confirm'),
   hint: $('hint'), busy: $('busy'), busyText: $('busyText'), toast: $('toast'), dropzone: $('dropzone'),
 };
@@ -52,9 +84,14 @@ const S = {
   cur: 0,
   slides: new Map(),
   tool: 'fill',
-  colorIndex: 0,
-  customColor: null,      // a color picked on the wheel, or null to use the palette swatch
-  size: 1,
+  color: '#e53935',      // the color in use, as #rrggbb
+  fromWheel: false,      // true when it came from the color wheel or the eyedropper, not a palette swatch
+  pattern: null,         // a pattern id while a pattern is chosen for Fill, otherwise null (solid color)
+  palTab: 0,             // which color set is showing
+  sizeT: 0.5,            // the size slider, 0 (smallest) to 1 (biggest). Each tool maps it to its own range.
+  brush: 'brush',        // the brush the Brushes button is set to
+  stampShape: 'star',
+  prevTool: 'fill',      // what to go back to after the eyedropper picks a color
   stayInLines: false,
   closeGaps: true,       // stop a fill from leaking out of a shape that has a small gap
   sound: true,
@@ -69,7 +106,7 @@ const newCanvas = (w, h) => Object.assign(document.createElement('canvas'), { wi
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, 'image/png'));
 const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
-const currentColor = () => S.customColor || COLORS[S.colorIndex][1];
+const currentColor = () => S.color;
 
 function loadSettings() {
   try {
@@ -342,13 +379,27 @@ function updateUI() {
   el.next.disabled = S.cur >= n - 1;
   const p = S.pages[S.cur];
   el.undo.disabled = !(p && p.undo.length);
-  document.querySelectorAll('.tool').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.tool === S.tool)));
-  document.querySelectorAll('.size').forEach((b) => b.setAttribute('aria-checked', String(+b.dataset.size === S.size)));
-  document.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-checked', String(!S.customColor && +b.dataset.index === S.colorIndex)));
-  el.sizes.classList.toggle('off', S.tool === 'fill');
+  document.querySelectorAll('.tool').forEach((b) => {
+    const group = b.dataset.group;
+    b.setAttribute('aria-checked', String(group ? groupActive(group) : b.dataset.tool === S.tool));
+    if (group === 'brush' && b.dataset.shown !== S.brush) { // the Brushes button shows whichever brush is chosen
+      const t = TOOLS[S.brush];
+      b.dataset.shown = S.brush;
+      b.innerHTML = `<svg class="icon"><use href="#${t.icon}"/></svg><span>${t.label}</span>`;
+      b.setAttribute('aria-label', `${t.label}. Tap again to choose another brush.`);
+    }
+  });
+  const patternTab = COLOR_SETS[S.palTab].id === 'pattern';
+  if (patternTab && patternPreviewColor !== S.color) renderPalette(); // pattern swatches are drawn in the current color
+  document.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-checked', String(patternTab ? b.dataset.pattern === S.pattern : !S.pattern && b.dataset.hex === S.color)));
+  document.querySelectorAll('.tab').forEach((b, i) => b.setAttribute('aria-selected', String(i === S.palTab)));
+  const sizable = !!TOOLS[S.tool]?.sizes;
+  el.sizebox.classList.toggle('off', !sizable);
+  $('sizeSlider').disabled = !sizable;
+  updateSizePreview();
   const wheelBtn = $('wheelBtn');
-  wheelBtn.setAttribute('aria-checked', String(!!S.customColor));
-  wheelBtn.style.setProperty('--picked', S.customColor || 'transparent');
+  wheelBtn.setAttribute('aria-checked', String(S.fromWheel));
+  wheelBtn.style.setProperty('--picked', S.fromWheel ? S.color : 'transparent');
   $('mLines').setAttribute('aria-checked', String(S.stayInLines));
   $('mLinesState').textContent = S.stayInLines ? 'On' : 'Off';
   $('mGaps').setAttribute('aria-checked', String(S.closeGaps));
@@ -422,12 +473,50 @@ function doFill(clientX, clientY) {
   pushUndo(p, bmp.x, bmp.y, bmp.w, bmp.h);
   fillTmp.width = bmp.w;
   fillTmp.height = bmp.h;
-  fillTmp.getContext('2d').putImageData(new ImageData(bmp.data, bmp.w, bmp.h), 0, 0);
+  const tctx = fillTmp.getContext('2d');
+  tctx.putImageData(new ImageData(bmp.data, bmp.w, bmp.h), 0, 0);
+  if (S.pattern) {
+    // Keep the pattern only where the solid fill is. It is anchored to the page, not to the shape,
+    // so neighbouring shapes filled with the same pattern line up.
+    tctx.save();
+    tctx.globalCompositeOperation = 'source-in';
+    tctx.translate(-bmp.x, -bmp.y);
+    tctx.fillStyle = tctx.createPattern(makeTile(S.pattern, S.color), 'repeat');
+    tctx.fillRect(bmp.x, bmp.y, bmp.w, bmp.h);
+    tctx.restore();
+  }
   p.paint.getContext('2d').drawImage(fillTmp, bmp.x, bmp.y);
   release(fillTmp);
   ripple(slide, clientX, clientY);
   pop();
   markDirty(p);
+  updateUI();
+}
+
+// The eyedropper: tap a colored spot to pick up its color.
+function pickColor(clientX, clientY) {
+  const p = S.pages[S.cur];
+  const slide = S.slides.get(S.cur);
+  if (!p?.paint || !slide) return;
+  const r = slide.paper.getBoundingClientRect();
+  const k = p.w / r.width;
+  const x = Math.round((clientX - r.left) * k);
+  const y = Math.round((clientY - r.top) * k);
+  if (x < 0 || y < 0 || x >= p.w || y >= p.h) return;
+  const d = p.paint.getContext('2d').getImageData(x, y, 1, 1).data;
+  if (d[3] < 24) { // nothing colored there
+    slide.paper.classList.remove('nope');
+    void slide.paper.offsetWidth;
+    slide.paper.classList.add('nope');
+    return;
+  }
+  const a = d[3] / 255; // a see-through color is shown over the white page, so pick what you can see
+  S.color = '#' + [d[0], d[1], d[2]].map((v) => Math.round(v * a + 255 * (1 - a)).toString(16).padStart(2, '0')).join('');
+  S.pattern = null;
+  S.fromWheel = true;
+  S.tool = S.prevTool && S.prevTool !== 'dropper' ? S.prevTool : 'fill';
+  ripple(slide, clientX, clientY);
+  pop();
   updateUI();
 }
 
@@ -455,9 +544,9 @@ function beginStroke(e) {
   const rect = slide.paper.getBoundingClientRect();
   const k = p.w / rect.width;
   const spec = TOOLS[S.tool];
-  const width = spec.sizes[S.size] * k;
+  const width = sizeFor(spec, S.sizeT) * k;
   const st = {
-    p, slide, rect, k, spec, width, half: Brush.reach(spec, width),
+    p, slide, rect, k, spec, width, half: Brush.reach(spec, width), shape: S.stampShape,
     color: spec.kind === 'erase' ? '#000000' : currentColor(),
     last: null, mid: null, box: null, points: 0, mask: null, before: null, ctx: null, timer: 0,
   };
@@ -651,7 +740,7 @@ function onDown(e) {
   const slide = S.slides.get(S.cur);
   if (performance.now() < S.animUntil) { G.mode = 'ignore'; return; }
   if (!p?.paint || !slide || !pointOnPaper(slide, e.clientX, e.clientY)) { G.mode = 'pending-swipe'; return; }
-  if (S.tool === 'fill') { G.mode = 'pending-fill'; return; }
+  if (S.tool === 'fill' || S.tool === 'dropper') { G.mode = 'pending-fill'; return; }
   beginStroke(e);
 }
 
@@ -712,7 +801,7 @@ function endSwipe() {
 function onUp(e) {
   if (!G.pointers.delete(e.pointerId)) return;
   if (G.mode === 'pending-fill' && e.pointerId === G.primary) {
-    doFill(G.startX, G.startY);
+    (S.tool === 'dropper' ? pickColor : doFill)(G.startX, G.startY);
     G.mode = 'ignore';
   } else if (G.mode === 'stroke' && e.pointerId === G.strokePointer) {
     endStroke();
@@ -740,18 +829,157 @@ document.addEventListener('gesturestart', (e) => e.preventDefault()); // no pinc
 
 // ------------------------------------------------------------------ toolbar
 
+// The row of big buttons. "Brushes" and "Stamp" each open a shelf with more to choose from.
+const MAIN_TOOLS = [
+  { id: 'fill', label: 'Fill', icon: 'i-fill' },
+  { group: 'brush', label: 'Brushes' },
+  { group: 'stamp', label: 'Stamp', icon: 'i-stamp' },
+  { id: 'eraser', label: 'Erase', icon: 'i-eraser' },
+  { id: 'dropper', label: 'Pick', icon: 'i-dropper' },
+];
+
+const groupActive = (group) => (group === 'brush' ? BRUSHES.includes(S.tool) : S.tool === 'stamp');
+
+function selectTool(id) {
+  if (id === 'dropper' && S.tool !== 'dropper') S.prevTool = S.tool;
+  S.tool = id;
+  if (BRUSHES.includes(id)) S.brush = id;
+}
+
 function buildTools() {
-  TOOL_ORDER.forEach((id) => {
-    const t = TOOLS[id];
+  MAIN_TOOLS.forEach((t) => {
     const b = document.createElement('button');
     b.className = 'tool';
     b.type = 'button';
-    b.dataset.tool = id;
     b.setAttribute('role', 'radio');
+    if (t.group) b.dataset.group = t.group;
+    else b.dataset.tool = t.id;
     b.setAttribute('aria-label', t.label);
-    b.innerHTML = `<svg class="icon"><use href="#${t.icon}"/></svg><span>${t.label}</span>`;
-    b.addEventListener('click', () => { S.tool = id; updateUI(); });
+    b.innerHTML = `<svg class="icon"><use href="#${t.icon || TOOLS[S.brush].icon}"/></svg><span>${t.label}</span>`;
+    b.addEventListener('click', () => {
+      if (t.group) {
+        // the first tap picks the tool, tapping it again opens its shelf
+        if (groupActive(t.group)) { toggleTray(t.group); return; }
+        closeTray();
+        selectTool(t.group === 'brush' ? S.brush : 'stamp');
+      } else {
+        closeTray();
+        selectTool(t.id);
+      }
+      updateUI();
+    });
     $('tools').append(b);
+  });
+}
+
+// --- the shelf (brushes and stamps)
+let trayGroup = null;
+
+function closeTray() {
+  $('tray').hidden = true;
+  trayGroup = null;
+}
+
+function toggleTray(group) {
+  if (trayGroup === group) closeTray();
+  else openTray(group);
+}
+
+function openTray(group) {
+  const tray = $('tray');
+  tray.replaceChildren();
+  trayGroup = group;
+  tray.setAttribute('aria-label', group === 'brush' ? 'Choose a brush' : 'Choose a stamp');
+  const items = group === 'brush'
+    ? BRUSHES.map((id) => ({ key: id, label: TOOLS[id].label, icon: TOOLS[id].icon, chosen: S.brush === id }))
+    : STAMP_SHAPES.map(([id, label]) => ({ key: id, label, shape: id, chosen: S.stampShape === id }));
+  for (const it of items) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tray-item';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(it.chosen));
+    b.setAttribute('aria-label', it.label);
+    b.dataset.item = it.key;
+    if (it.icon) {
+      b.innerHTML = `<svg class="icon"><use href="#${it.icon}"/></svg><span>${it.label}</span>`;
+    } else {
+      const c = newCanvas(88, 88); // drawn at twice the size so it stays sharp
+      drawStamp(c.getContext('2d'), it.shape, 44, 44, 34, currentColor());
+      b.append(c);
+      b.insertAdjacentHTML('beforeend', `<span>${it.label}</span>`);
+    }
+    b.addEventListener('click', () => {
+      if (group === 'brush') selectTool(it.key);
+      else { S.stampShape = it.key; selectTool('stamp'); }
+      closeTray();
+      updateUI();
+    });
+    tray.append(b);
+  }
+  tray.hidden = false;
+}
+
+// --- the size slider
+function updateSizePreview() {
+  const spec = TOOLS[S.tool];
+  const px = spec?.sizes ? sizeFor(spec, S.sizeT) : 30;
+  const d = 6 + Math.sqrt(px / 110) * 34; // a dot that grows with the brush, from 6 to 40 px
+  const prev = $('sizePreview');
+  prev.style.width = prev.style.height = `${d.toFixed(1)}px`;
+  prev.style.background = S.tool === 'eraser' ? '#ffffff' : S.color;
+}
+
+// --- palette tabs and swatches
+let patternPreviewColor = null;
+
+function swatchButton() {
+  const b = document.createElement('button');
+  b.className = 'swatch';
+  b.type = 'button';
+  b.setAttribute('role', 'radio');
+  return b;
+}
+
+// Picking a color or pattern means "I want to color now", so leave the eraser or eyedropper.
+const backToColoring = () => { if (S.tool === 'eraser' || S.tool === 'dropper') selectTool('fill'); };
+
+function renderPalette() {
+  const set = COLOR_SETS[S.palTab];
+  el.palette.replaceChildren();
+  if (set.id === 'pattern') {
+    patternPreviewColor = S.color;
+    for (const [id, label] of PATTERNS) {
+      const b = swatchButton();
+      b.classList.add('pattern');
+      b.dataset.pattern = id;
+      b.setAttribute('aria-label', label);
+      b.style.backgroundImage = `url(${tileUrl(id, S.color)})`;
+      b.addEventListener('click', () => { S.pattern = id; backToColoring(); updateUI(); });
+      el.palette.append(b);
+    }
+  } else {
+    for (const [name, hex] of set.colors) {
+      const b = swatchButton();
+      b.dataset.hex = hex;
+      b.style.setProperty('--c', hex);
+      b.setAttribute('aria-label', name);
+      b.addEventListener('click', () => { S.color = hex; S.pattern = null; S.fromWheel = false; backToColoring(); updateUI(); });
+      el.palette.append(b);
+    }
+  }
+}
+
+function buildTabs() {
+  COLOR_SETS.forEach((set, i) => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-label', set.label);
+    b.style.background = set.tab;
+    b.addEventListener('click', () => { S.palTab = i; renderPalette(); updateUI(); });
+    $('tabs').append(b);
   });
 }
 
@@ -764,33 +992,25 @@ function bindWheel() {
     swatch: $('wheelSwatch'),
     doneButton: $('wheelDone'),
     onChange: (hex) => {
-      S.customColor = hex;
-      if (S.tool === 'eraser') S.tool = 'fill';
+      S.color = hex;
+      S.pattern = null;
+      S.fromWheel = true;
+      backToColoring();
       updateUI();
     },
     onDone: updateUI,
   });
-  $('wheelBtn').addEventListener('click', () => wheel.open(currentColor(), !!S.customColor));
+  $('wheelBtn').addEventListener('click', () => wheel.open(currentColor(), S.fromWheel));
 }
 
 function buildPalette() {
-  COLORS.forEach(([name, hex], i) => {
-    const b = document.createElement('button');
-    b.className = 'swatch';
-    b.type = 'button';
-    b.setAttribute('role', 'radio');
-    b.dataset.index = i;
-    b.style.setProperty('--c', hex);
-    b.setAttribute('aria-label', name);
-    b.addEventListener('click', () => {
-      S.colorIndex = i;
-      S.customColor = null;
-      if (S.tool === 'eraser') S.tool = 'fill'; // picking a color means "I want to color now"
-      updateUI();
-    });
-    el.palette.append(b);
-  });
-  document.querySelectorAll('.size').forEach((b) => b.addEventListener('click', () => { S.size = +b.dataset.size; updateUI(); }));
+  buildTabs();
+  renderPalette();
+  $('sizeSlider').addEventListener('input', (e) => { S.sizeT = e.target.value / 100; updateSizePreview(); });
+  // a tap anywhere else puts the shelf away
+  document.addEventListener('pointerdown', (e) => {
+    if (!$('tray').hidden && !e.target.closest('#tray, .tool[data-group]')) closeTray();
+  }, true);
   el.prev.addEventListener('click', () => goTo(S.cur - 1));
   el.next.addEventListener('click', () => goTo(S.cur + 1));
   el.undo.addEventListener('click', undo);
@@ -1168,6 +1388,8 @@ function guardButtons() {
   const ignored = new Map();   // pointerId -> true while the touch is being ignored
   const downAt = new Map();    // pointerId -> when it went down on the buttons
   let suppress = null;         // { x, y, until }: the one spot whose click is being swallowed
+  let ignoreTouchUntil = 0;    // a touch whose pointer was just ignored must not reach the slider either
+  let heldOff = 0;             // how many ignored touches are down right now. The size slider is switched off while any is.
   const swallowClickAt = (e) => { suppress = { x: e.clientX, y: e.clientY, until: performance.now() + 300 }; };
 
   document.addEventListener('pointerdown', (e) => {
@@ -1175,7 +1397,11 @@ function guardButtons() {
     const big = e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > BIG_TOUCH_PX;
     if (big || G.pointers.size > 0) {
       ignored.set(e.pointerId, true);
-      e.stopPropagation();
+      ignoreTouchUntil = performance.now() + 60;
+      // A range slider drags itself from the raw touch, and Chrome will not let a page cancel that touch,
+      // but a disabled slider ignores it. So switch the slider off until this touch is over.
+      if (heldOff++ === 0) $('sizeSlider').disabled = true;
+      e.stopImmediatePropagation(); // nothing after this (shelf, buttons) may see the touch
       e.preventDefault();
     } else {
       downAt.set(e.pointerId, performance.now());
@@ -1185,8 +1411,12 @@ function guardButtons() {
   for (const type of ['pointermove', 'pointerup', 'pointercancel']) {
     document.addEventListener(type, (e) => {
       if (ignored.has(e.pointerId)) {
-        e.stopPropagation();
-        if (type !== 'pointermove') { ignored.delete(e.pointerId); swallowClickAt(e); }
+        e.stopImmediatePropagation(); // nothing after this (shelf, buttons) may see the touch
+        if (type !== 'pointermove') {
+          ignored.delete(e.pointerId);
+          swallowClickAt(e);
+          if (--heldOff <= 0) { heldOff = 0; updateUI(); } // updateUI puts the slider back to what it should be
+        }
         return;
       }
       if (type !== 'pointermove' && downAt.has(e.pointerId)) {
@@ -1198,10 +1428,16 @@ function guardButtons() {
     }, true);
   }
 
+  // Where the browser allows it, also cancel the raw touch that belongs to an ignored pointer.
+  // (The pointer event and its touch event arrive together, so a short window is enough to pair them up.)
+  document.addEventListener('touchstart', (e) => {
+    if (performance.now() < ignoreTouchUntil && onButtons(e.target) && e.cancelable) e.preventDefault();
+  }, { capture: true, passive: false });
+
   document.addEventListener('click', (e) => {
     // only the click that this touch would have caused: same place, right after. Taps anywhere else, and keyboard clicks, are untouched.
     if (suppress && performance.now() < suppress.until && Math.hypot(e.clientX - suppress.x, e.clientY - suppress.y) < 40 && onButtons(e.target)) {
-      e.stopPropagation();
+      e.stopImmediatePropagation(); // nothing after this (shelf, buttons) may see the touch
       e.preventDefault();
     }
   }, true);
@@ -1230,12 +1466,12 @@ function flushOnLeave() {
 }
 
 loadSettings();
+guardButtons(); // first, so its listeners run before any other touch listener on the page
 buildTools();
 buildPalette();
 bindWheel();
 bindMenu();
 setupFullscreen();
-guardButtons();
 watchZoom();
 bindLibrary();
 updateUI();
@@ -1249,4 +1485,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 
 // For automated tests.
-window.__cb = { S, goTo, undo };
+window.__cb = {
+  S, goTo, undo,
+  setTool: (id) => { selectTool(id); updateUI(); },
+  setSize: (t) => { S.sizeT = t; $('sizeSlider').value = String(Math.round(t * 100)); updateUI(); },
+};
