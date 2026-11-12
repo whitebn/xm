@@ -6,7 +6,7 @@
   <title>Coloring Book</title>
   <meta name="description" content="A coloring book for little hands. Import a PDF, tap to fill, paint with a highlighter brush, and swipe between pages.">
   <meta name="theme-color" content="#ffd84d">
-  <meta name="cb-version" content="6">
+  <meta name="cb-version" content="7">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="mobile-web-app-capable" content="yes">
@@ -41,6 +41,12 @@
     <symbol id="i-crayon" viewBox="0 0 24 24"><path d="m6.5 17 9.7-9.7 3 3L9.5 20z"/><path d="m6.5 17-1.5 3.4 4.5-.4M14 9.5l3 3M16.2 7.3l1.4-1.4a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2l-1.4 1.4"/></symbol>
     <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M10.5 3c.6 4.6 2.8 6.8 7.4 7.4-4.6.6-6.8 2.8-7.4 7.4-.6-4.6-2.8-6.8-7.4-7.4C7.7 9.8 9.9 7.6 10.5 3z"/><path d="M18.5 15.5v5M16 18h5"/></symbol>
     <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-highlighter" viewBox="0 0 24 24"><path d="m14.6 4 5.4 5.4-8.9 8.9-5.4-5.4z"/><path d="m5.7 12.9-1.7 6.8 6.8-1.7M3.5 21.5H11"/></symbol>
+    <symbol id="i-marker" viewBox="0 0 24 24"><g transform="rotate(45 12 12)"><rect x="9" y="2.5" width="6" height="12" rx="1.2"/><path d="M9 7.5h6M10.2 14.5 12 21l1.8-6.5"/></g></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="m5 19 .9-3.6L16.6 4.7a1.9 1.9 0 0 1 2.7 0l.1.1a1.9 1.9 0 0 1 0 2.7L8.6 18.1z"/><path d="m14.6 6.7 2.7 2.7M5 19l3.5-.9"/></symbol>
+    <symbol id="i-glitter" viewBox="0 0 24 24"><path d="m5.5 19.5 1-4 8.2-8.2 3 3-8.2 8.2z"/><path d="M16.5 3.5v3M15 5h3M20 11v2M19 12h2"/></symbol>
+    <symbol id="i-stamp" viewBox="0 0 24 24"><path d="M10 3.5h4v5a2.5 2.5 0 0 0 1.5 2.3V13h-7v-2.2A2.5 2.5 0 0 0 10 8.5z"/><path d="M5.5 13h13v3h-13zM4.5 19.5h15"/></symbol>
+    <symbol id="i-dropper" viewBox="0 0 24 24"><path d="m15 4.5 4.5 4.5M13.5 6 18 10.5l-7.3 7.3-3.9 1 1-3.9z"/><path d="m17.5 3.5 3 3"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </defs>
 </svg>
@@ -97,14 +103,15 @@
   <footer class="toolbar">
     <div class="tools" id="tools" role="radiogroup" aria-label="Tools"></div>
     <div class="toolrow">
-      <div class="sizes" id="sizes" role="radiogroup" aria-label="Brush size">
-        <button class="size" data-size="0" role="radio" type="button" aria-label="Small"><i></i></button>
-        <button class="size" data-size="1" role="radio" type="button" aria-label="Medium"><i></i></button>
-        <button class="size" data-size="2" role="radio" type="button" aria-label="Big"><i></i></button>
+      <div class="sizebox" id="sizebox">
+        <input id="sizeSlider" type="range" min="0" max="100" value="50" aria-label="Brush size">
+        <i id="sizePreview" aria-hidden="true"></i>
       </div>
+      <div class="tabs" id="tabs" role="tablist" aria-label="Color sets"></div>
       <button id="wheelBtn" class="wheel-btn" type="button" role="radio" aria-label="Color wheel: pick any color"><i></i></button>
     </div>
     <div class="palette" id="palette" role="radiogroup" aria-label="Colors"></div>
+    <div class="tray" id="tray" role="radiogroup" aria-label="Choose a brush" hidden></div>
   </footer>
 </div>
 

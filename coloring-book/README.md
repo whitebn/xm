@@ -11,13 +11,12 @@ It is a web app (it also installs to a phone or tablet home screen). There is no
   - A tap that lands on the line itself (easy to do with a small finger) fills the nearest shape.
   - A fill is exact: it fills everything the lines enclose, narrow passages included, so a face fills in one tap.
   - **Leak guard.** If a shape has a small gap in its outline, a fill could escape and color the whole page. The app notices when a fill reaches the page edge and the shape would be closed if its gaps were closed (gaps up to about 0.1 inch), and keeps the color inside the shape. This can be switched off in the grown-ups menu ("Fill stops at small gaps in the lines") if you prefer plain fills.
-- **Paint tools.** Pick a texture, a color and one of three sizes. The black lines always stay visible on top of the color.
-  - **Paint**: a translucent highlighter.
-  - **Spray**: a speckled spray can. Hold still and it gets denser.
-  - **Roller**: a wide flat ribbon with paint streaks.
-  - **Crayon**: waxy and grainy, the paper shows through.
-  - **Sparkle**: a trail of little stars and dots.
-- **Color wheel.** Tap the rainbow circle to pick any color, and slide from dark to bright.
+- **Brushes.** Tap **Brushes** to use the current brush, and tap it again to open the shelf of all nine: highlighter (see-through, lines show), marker, pencil (grainy and thin), paintbrush (fatter when you move slowly, thinner when fast, with bristle lines), crayon (waxy and grainy), spray (denser the longer you hold still), roller (a wide flat ribbon with paint streaks), glitter pen and sparkle trail. The lines of the picture always stay visible on top of the color.
+- **Stamps.** Tap **Stamp**, and tap again to pick a shape (star, heart, flower, smiley, paw, cloud). Tap to place one, drag to leave a trail.
+- **Size slider.** One slider for every brush and stamp, with a dot that shows the size. It is switched off for Fill and Pick, which have no size.
+- **Color tabs.** Five tabs next to the slider: bright colors, pastels, skin and earth tones, greys and darks, and **patterns**. A pattern (dots, polka dots, stripes, diagonal, checks, hearts, stars, waves, zigzag, confetti, rainbow, glitter) is used by Fill, drawn in the current color, and lines up from one shape to the next.
+- **Color wheel.** Tap the rainbow circle to pick any color, and slide from dark to bright. It also shows a color picked with Pick.
+- **Pick** (the eyedropper) picks up the color of any painted spot. A see-through highlighter gives the color you can see on the page.
 - **Erase** and **Undo** (30 steps per page).
 - **Save** (download arrow) saves the page as a PNG, or opens the share sheet where the device has one. **Clear** (trash can) wipes the page and needs a press and hold. Undo brings the page back.
 - **Swipe between pages.** See the gesture table below. Big arrow buttons and a "pick a picture" grid are always available too.
@@ -31,8 +30,8 @@ It is a web app (it also installs to a phone or tablet home screen). There is no
 
 | Tool | One finger | Two fingers |
 | --- | --- | --- |
-| Fill | tap = fill, drag sideways = turn the page | turn the page |
-| Paint tools / Erase | drag = draw, drag starting in the margin around the paper = turn the page | turn the page |
+| Fill and Pick | tap = fill or pick up a color, drag sideways = turn the page | turn the page |
+| Brushes, Stamp, Erase | drag = draw, drag starting in the margin around the paper = turn the page | turn the page |
 
 Nothing moves the page until a finger has traveled about 48 pixels sideways, so the wobble of a small hand tapping or scribbling never nudges it. A second finger that only rests on the screen (like a palm) is ignored. Two fingers must both move the same way to count as a swipe.
 
@@ -57,7 +56,7 @@ Installing it to the home screen is also the best way to use it with a toddler, 
 
 A child leaning on the tablet can press buttons with a belly or palm. The app ignores a touch on the top or bottom buttons (and the click it would cause) when any of these is true:
 
-- the contact is bigger than a fingertip (wider or taller than 80 CSS pixels),
+- the contact is bigger than a fingertip (wider or taller than 80 CSS pixels). The size slider is switched off for the length of such a touch, because a slider drags itself from the raw touch and Chrome does not let a page cancel that,
 - a finger is already painting or swiping on the picture,
 - the press is held longer than about 0.9 seconds (the grown-ups lock and the clear button are meant to be held, so they are exempt from this one).
 
@@ -90,7 +89,8 @@ Things that differ on iPad:
 index.html        page structure and icons
 styles.css        look and layout (phone, tablet, landscape)
 js/app.js         screens, swipe gestures, strokes, undo, saving
-js/brushes.js     the tool list and how each texture is drawn
+js/brushes.js     the tool list, how each brush and stamp is drawn
+js/patterns.js    the fill patterns
 js/colorwheel.js  the color wheel dialog
 js/fill.js        pure pixel code: line detection, flood fill, gap closing
 js/sources.js     where pages come from: PDF (pdf.js) and the built-in sample book
@@ -107,9 +107,11 @@ Each page is two canvases stacked on a white sheet: your **color layer** at the 
 
 ## Adding to it
 
-- **A new brush or texture.** Add an entry to `TOOLS` in `js/brushes.js` (name, icon, sizes, how it blends) and an icon symbol in `index.html`. If it needs its own look, handle its `id` in `dot()` and `seg()`. The toolbar, undo, saving and "stay inside the lines" all pick it up with no other changes.
+- **A new brush.** Add an entry to `TOOLS` in `js/brushes.js` (name, icon, sizes, how it blends), add its id to `BRUSHES` so it appears on the shelf, and add an icon symbol in `index.html`. If it needs its own look, handle its `id` in `dot()` and `seg()`. Undo, saving, the size slider and "stay inside the lines" all pick it up with no other changes.
+- **A new stamp shape.** Add `[id, label]` to `STAMP_SHAPES` and a case to `drawStamp()` in `js/brushes.js`.
+- **A new pattern.** Add `[id, label]` to `PATTERNS` and a case to `makeTile()` in `js/patterns.js`. Draw marks with the `wrap()` helper so they continue across the tile edge.
+- **A new color set.** Add an entry to `COLOR_SETS` at the top of `js/app.js`. It becomes a tab.
 - **A new source of pages.** Anything with `numPages` and `renderLine(index, longSide)` that returns a canvas of black art on white works. See `js/sources.js`.
-- **A new color.** Edit `COLORS` at the top of `js/app.js`.
 - **Pages shipped inside the app** (for example a starter pack): add a source class like `SampleSource`, or bundle PDFs and open them through `PdfSource`.
 
 ## Tests
