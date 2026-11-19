@@ -193,6 +193,6 @@ The application will be available at:
 
 MIT
 
-## Also in this repo
+## Coloring book app
 
-[`coloring-book/`](coloring-book/README.md) is a separate, standalone coloring book app for toddlers (import a PDF, tap to fill, swipe between pages). It does not share code with the project management system above.
+The toddler coloring book app (import a PDF, tap to fill, brushes, stamps, swipe between pages) used to live in this repository. It now has its own repository: <https://github.com/whitebn/coloring-book>.
